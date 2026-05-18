@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>Linear Sweep - replan_028_linear</name>
+    <description>Two-Way Linear Sweep (Mode C).
+Start: 31.230000,121.473000
+End:   31.231000,121.474000
+Length: 146.5m | Offset: 8.0m | Altitudes: [5.0, 15.0] | Speed: 1.5m/s
+Generated: 2026-05-18T18:42:29.937172</description>
+    <Style id="path">
+      <LineStyle><color>ff00ffff</color><width>3</width></LineStyle>
+    </Style>
+    <Placemark>
+      <name>Sweep A @ 5.0m</name>
+      <styleUrl>#path</styleUrl>
+      <LineString>
+        <altitudeMode>relativeToGround</altitudeMode>
+        <tessellate>1</tessellate>
+        <coordinates>
+          121.4729361,31.2300467,5.0
+          121.4739361,31.2310467,5.0
+        </coordinates>
+      </LineString>
+    </Placemark>
+    <Placemark>
+      <name>Sweep B @ 5.0m</name>
+      <styleUrl>#path</styleUrl>
+      <LineString>
+        <altitudeMode>relativeToGround</altitudeMode>
+        <tessellate>1</tessellate>
+        <coordinates>
+          121.4740639,31.2309533,5.0
+          121.4730639,31.2299533,5.0
+        </coordinates>
+      </LineString>
+    </Placemark>
+    <Placemark>
+      <name>Sweep A @ 15.0m</name>
+      <styleUrl>#path</styleUrl>
+      <LineString>
+        <altitudeMode>relativeToGround</altitudeMode>
+        <tessellate>1</tessellate>
+        <coordinates>
+          121.4729361,31.2300467,15.0
+          121.4739361,31.2310467,15.0
+        </coordinates>
+      </LineString>
+    </Placemark>
+    <Placemark>
+      <name>Sweep B @ 15.0m</name>
+      <styleUrl>#path</styleUrl>
+      <LineString>
+        <altitudeMode>relativeToGround</altitudeMode>
+        <tessellate>1</tessellate>
+        <coordinates>
+          121.4740639,31.2309533,15.0
+          121.4730639,31.2299533,15.0
+        </coordinates>
+      </LineString>
+    </Placemark>
+  </Document>
+</kml>

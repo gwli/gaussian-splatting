@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>Grid Scan - replan_027_grid</name>
+    <description>Lawnmower Grid Scan (Mode B).
+Center: 31.230400,121.473700
+Area: 100.0x60.0m | Spacing: 20.0m | Altitudes: [30.0, 45.0] | Speed: 2.5m/s
+Generated: 2026-05-18T18:42:29.894680</description>
+    <Style id="path">
+      <LineStyle><color>ff00ffff</color><width>3</width></LineStyle>
+    </Style>
+    <Placemark>
+      <name>Grid @ 30.0m AGL</name>
+      <styleUrl>#path</styleUrl>
+      <LineString>
+        <altitudeMode>relativeToGround</altitudeMode>
+        <tessellate>1</tessellate>
+        <coordinates>
+          121.4731747,31.2301305,30.0
+          121.4742253,31.2301305,30.0
+          121.4742253,31.2303102,30.0
+          121.4731747,31.2303102,30.0
+          121.4731747,31.2304898,30.0
+          121.4742253,31.2304898,30.0
+          121.4742253,31.2306695,30.0
+          121.4731747,31.2306695,30.0
+        </coordinates>
+      </LineString>
+    </Placemark>
+    <Placemark>
+      <name>Grid @ 45.0m AGL</name>
+      <styleUrl>#path</styleUrl>
+      <LineString>
+        <altitudeMode>relativeToGround</altitudeMode>
+        <tessellate>1</tessellate>
+        <coordinates>
+          121.4731747,31.2301305,45.0
+          121.4742253,31.2301305,45.0
+          121.4742253,31.2303102,45.0
+          121.4731747,31.2303102,45.0
+          121.4731747,31.2304898,45.0
+          121.4742253,31.2304898,45.0
+          121.4742253,31.2306695,45.0
+          121.4731747,31.2306695,45.0
+        </coordinates>
+      </LineString>
+    </Placemark>
+  </Document>
+</kml>

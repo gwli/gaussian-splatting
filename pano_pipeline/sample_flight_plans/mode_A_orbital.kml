@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>Mode A: 3-Layer Orbital (3DGS-friendly)</name>
+    <description>
+      Triple-altitude orbital scan for 3DGS reconstruction of a single subject.
+      Adjust CENTER coordinates and radius before flight.
+      Designed for Antigravity A1 8K 360° panoramic drone.
+
+      Subject center: 31.2304°N 121.4737°E (replace with actual)
+      Radius: 15m
+      Speed: 1.5 m/s
+      Altitudes: 5m, 10m, 15m AGL
+      Capture: continuous video at 30fps, 8K
+    </description>
+
+    <Style id="orbital">
+      <LineStyle>
+        <color>ff00ffff</color>
+        <width>3</width>
+      </LineStyle>
+    </Style>
+
+    <!-- LAYER 1: Low orbit (5m AGL) -->
+    <Placemark>
+      <name>Layer 1 - 5m altitude</name>
+      <styleUrl>#orbital</styleUrl>
+      <LineString>
+        <altitudeMode>relativeToGround</altitudeMode>
+        <tessellate>1</tessellate>
+        <coordinates>
+          121.47386,31.23040,5
+          121.47384,31.23045,5
+          121.47379,31.23048,5
+          121.47373,31.23050,5
+          121.47367,31.23048,5
+          121.47362,31.23045,5
+          121.47360,31.23040,5
+          121.47362,31.23035,5
+          121.47367,31.23032,5
+          121.47373,31.23030,5
+          121.47379,31.23032,5
+          121.47384,31.23035,5
+          121.47386,31.23040,5
+        </coordinates>
+      </LineString>
+    </Placemark>
+
+    <!-- LAYER 2: Mid orbit (10m AGL) -->
+    <Placemark>
+      <name>Layer 2 - 10m altitude</name>
+      <styleUrl>#orbital</styleUrl>
+      <LineString>
+        <altitudeMode>relativeToGround</altitudeMode>
+        <tessellate>1</tessellate>
+        <coordinates>
+          121.47386,31.23040,10
+          121.47384,31.23045,10
+          121.47379,31.23048,10
+          121.47373,31.23050,10
+          121.47367,31.23048,10
+          121.47362,31.23045,10
+          121.47360,31.23040,10
+          121.47362,31.23035,10
+          121.47367,31.23032,10
+          121.47373,31.23030,10
+          121.47379,31.23032,10
+          121.47384,31.23035,10
+          121.47386,31.23040,10
+        </coordinates>
+      </LineString>
+    </Placemark>
+
+    <!-- LAYER 3: High orbit (15m AGL) -->
+    <Placemark>
+      <name>Layer 3 - 15m altitude</name>
+      <styleUrl>#orbital</styleUrl>
+      <LineString>
+        <altitudeMode>relativeToGround</altitudeMode>
+        <tessellate>1</tessellate>
+        <coordinates>
+          121.47386,31.23040,15
+          121.47384,31.23045,15
+          121.47379,31.23048,15
+          121.47373,31.23050,15
+          121.47367,31.23048,15
+          121.47362,31.23045,15
+          121.47360,31.23040,15
+          121.47362,31.23035,15
+          121.47367,31.23032,15
+          121.47373,31.23030,15
+          121.47379,31.23032,15
+          121.47384,31.23035,15
+          121.47386,31.23040,15
+        </coordinates>
+      </LineString>
+    </Placemark>
+  </Document>
+</kml>
