@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>3DGS WebXR Viewer (PICO 4 Ultra)</title>
+  <script type="text/javascript" src="js/util.js"></script>
+  <script type="importmap">
+    {
+        "imports": {
+            "three": "./lib/three.module.js",
+            "@mkkellogg/gaussian-splats-3d": "./lib/gaussian-splats-3d.module.js"
+        }
+    }
+  </script>
+  <style>
+    body { background-color: #000; margin: 0; padding: 0; height: 100vh; overflow: hidden; font-family: sans-serif; }
+    #status {
+      position: fixed; top: 0; left: 0; right: 0;
+      background: rgba(0,0,0,0.7); color: #0f0;
+      padding: 8px 16px; font: 13px monospace; z-index: 10;
+    }
+    #scenePicker {
+      position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+      background: rgba(0,0,0,0.8); color: #fff; padding: 12px;
+      border-radius: 8px; z-index: 10; display: flex; gap: 8px;
+    }
+    #scenePicker a {
+      color: #4cf; text-decoration: none; padding: 6px 12px;
+      background: rgba(255,255,255,0.1); border-radius: 4px;
+    }
+    #scenePicker a:hover { background: rgba(255,255,255,0.25); }
+    #scenePicker a.active { background: #4cf; color: #000; }
+  </style>
+</head>
+<body>
+  <div id="status">Loading...</div>
+  <div id="scenePicker">
+    <span style="color:#888">Scene:</span>
+    <a href="?scene=scene_021">021</a>
+    <a href="?scene=scene_022">022</a>
+    <a href="?scene=scene_023">023</a>
+    <a href="?scene=scene_025">025</a>
+  </div>
+
+  <script type="module">
+    import * as GaussianSplats3D from '@mkkellogg/gaussian-splats-3d';
+    import * as THREE from 'three';
+
+    const status = document.getElementById('status');
+    const log = (msg) => { status.textContent = msg; console.log(msg); };
+
+    // Parse URL params
+    const params = new URLSearchParams(location.search);
+    const scene = params.get('scene') || 'scene_021';
+    const customUrl = params.get('ply');
+
+    // Default scene URL pattern (relative path on this server)
+    const sceneUrl = customUrl ||
+      `/data/8kpano/scenes/${scene}/output/point_cloud/iteration_30000/point_cloud.ply`;
+
+    // Highlight active scene
+    document.querySelectorAll('#scenePicker a').forEach(a => {
+      if (a.getAttribute('href') === `?scene=${scene}`) a.classList.add('active');
+    });
+
+    log(`Loading: ${sceneUrl}`);
+
+    const viewer = new GaussianSplats3D.Viewer({
+      'cameraUp': [0, -1, 0],
+      'initialCameraPosition': [0, 0, 3],
+      'initialCameraLookAt': [0, 0, 0],
+      'webXRMode': GaussianSplats3D.WebXRMode.VR,
+      'sharedMemoryForWorkers': false,
+      'gpuAcceleratedSort': true,
+    });
+
+    viewer.addSplatScene(sceneUrl, {
+      'progressiveLoad': false,
+      'showLoadingUI': true,
+    })
+    .then(() => {
+      log(`Loaded ${scene}. Click "Enter VR" (bottom-right) to view in PICO 4 Ultra.`);
+      viewer.start();
+    })
+    .catch(err => {
+      log(`Error: ${err.message}`);
+      console.error(err);
+    });
+  </script>
+</body>
+</html>

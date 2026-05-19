@@ -1,0 +1,7 @@
+# Third-party WebXR viewer source (cloned at setup)
+GaussianSplats3D/
+
+# Self-signed certificate (regenerate per host)
+certs/
+*.crt
+*.key
