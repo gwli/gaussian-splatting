@@ -17,13 +17,14 @@
     body { background-color: #000; margin: 0; padding: 0; height: 100vh; overflow: hidden; font-family: sans-serif; }
     #status {
       position: fixed; top: 0; left: 0; right: 0;
-      background: rgba(0,0,0,0.7); color: #0f0;
-      padding: 8px 16px; font: 13px monospace; z-index: 10;
+      background: rgba(0,0,0,0.85); color: #0f0;
+      padding: 8px 16px; font: 12px monospace; z-index: 10;
+      white-space: pre-wrap; max-height: 35vh; overflow-y: auto;
     }
     #scenePicker {
       position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
-      background: rgba(0,0,0,0.8); color: #fff; padding: 12px;
-      border-radius: 8px; z-index: 10; display: flex; gap: 8px;
+      background: rgba(0,0,0,0.85); color: #fff; padding: 12px;
+      border-radius: 8px; z-index: 10; display: flex; gap: 8px; flex-wrap: wrap;
     }
     #scenePicker a {
       color: #4cf; text-decoration: none; padding: 6px 12px;
@@ -34,7 +35,7 @@
   </style>
 </head>
 <body>
-  <div id="status">Loading...</div>
+  <div id="status">Initializing...</div>
   <div id="scenePicker">
     <span style="color:#888">Scene:</span>
     <a href="?scene=scene_021">021</a>
@@ -43,50 +44,94 @@
     <a href="?scene=scene_025">025</a>
   </div>
 
+  <script>
+    // Visible log (DevTools is hard to access in headset)
+    const _logEl = document.getElementById('status');
+    _logEl.textContent = '';
+    const _log = (msg, color = '#0f0') => {
+      const t = new Date().toLocaleTimeString();
+      _logEl.style.color = color;
+      _logEl.textContent += `[${t}] ${msg}\n`;
+      _logEl.scrollTop = _logEl.scrollHeight;
+      console.log(msg);
+    };
+    window._log = _log;
+    _log(`viewer.html @ ${location.href}`);
+    _log(`crossOriginIsolated=${self.crossOriginIsolated} SAB=${typeof SharedArrayBuffer !== 'undefined'}`);
+
+    // Capture fetch errors so we can see them in headset
+    const _origFetch = window.fetch;
+    window.fetch = function(...args) {
+      const url = typeof args[0] === 'string' ? args[0] : args[0].url;
+      _log(`fetch → ${String(url).slice(-70)}`);
+      return _origFetch(...args)
+        .then(r => {
+          _log(`  ← ${r.status} ${r.statusText} (${r.headers.get('content-length') || '?'} B)`);
+          if (!r.ok) _log(`  HTTP error!`, '#f55');
+          return r;
+        })
+        .catch(e => {
+          _log(`  fetch threw: ${e.message}`, '#f55');
+          throw e;
+        });
+    };
+
+    window.addEventListener('error', e => {
+      _log(`window error: ${e.message} @ ${e.filename}:${e.lineno}`, '#f55');
+    });
+    window.addEventListener('unhandledrejection', e => {
+      _log(`promise rejected: ${e.reason?.message || e.reason}`, '#f55');
+    });
+  </script>
+
   <script type="module">
     import * as GaussianSplats3D from '@mkkellogg/gaussian-splats-3d';
     import * as THREE from 'three';
 
-    const status = document.getElementById('status');
-    const log = (msg) => { status.textContent = msg; console.log(msg); };
+    const log = window._log;
 
-    // Parse URL params
     const params = new URLSearchParams(location.search);
     const scene = params.get('scene') || 'scene_021';
-    const customUrl = params.get('ply');
-
-    // Default scene URL pattern (relative path on this server)
+    const customUrl = params.get('ply') || params.get('url');
+    // Default to .ksplat (10x smaller than PLY, native format for this viewer)
+    const format = params.get('format') || 'ksplat';
     const sceneUrl = customUrl ||
-      `/data/8kpano/scenes/${scene}/output/point_cloud/iteration_30000/point_cloud.ply`;
+      `/data/8kpano/scenes/${scene}/output/point_cloud/iteration_30000/point_cloud.${format}`;
 
-    // Highlight active scene
     document.querySelectorAll('#scenePicker a').forEach(a => {
       if (a.getAttribute('href') === `?scene=${scene}`) a.classList.add('active');
     });
 
-    log(`Loading: ${sceneUrl}`);
+    log(`Loading scene=${scene}`);
 
-    const viewer = new GaussianSplats3D.Viewer({
-      'cameraUp': [0, -1, 0],
-      'initialCameraPosition': [0, 0, 3],
-      'initialCameraLookAt': [0, 0, 0],
-      'webXRMode': GaussianSplats3D.WebXRMode.VR,
-      'sharedMemoryForWorkers': false,
-      'gpuAcceleratedSort': true,
-    });
+    try {
+      const viewer = new GaussianSplats3D.Viewer({
+        'cameraUp': [0, -1, 0],
+        'initialCameraPosition': [0, 0, 3],
+        'initialCameraLookAt': [0, 0, 0],
+        'webXRMode': GaussianSplats3D.WebXRMode.VR,
+        'sharedMemoryForWorkers': false,
+        'gpuAcceleratedSort': true,
+      });
+      log('Viewer constructed');
 
-    viewer.addSplatScene(sceneUrl, {
-      'progressiveLoad': false,
-      'showLoadingUI': true,
-    })
-    .then(() => {
-      log(`Loaded ${scene}. Click "Enter VR" (bottom-right) to view in PICO 4 Ultra.`);
-      viewer.start();
-    })
-    .catch(err => {
-      log(`Error: ${err.message}`);
-      console.error(err);
-    });
+      // Format is auto-detected from extension (.ksplat / .ply / .splat / .spz)
+      viewer.addSplatScene(sceneUrl, {
+        'progressiveLoad': false,
+        'showLoadingUI': true,
+      })
+      .then(() => {
+        log(`✓ Loaded ${scene}. Click "Enter VR" (right corner) to view in PICO.`);
+        viewer.start();
+      })
+      .catch(err => {
+        log(`✗ addSplatScene failed: ${err.message}`, '#f55');
+        if (err.stack) log(`stack: ${err.stack.slice(0, 500)}`, '#f99');
+        if (err.cause) log(`cause: ${err.cause.message}`, '#f99');
+      });
+    } catch (err) {
+      log(`✗ Viewer constructor threw: ${err.message}`, '#f55');
+    }
   </script>
 </body>
 </html>

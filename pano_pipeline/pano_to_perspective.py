@@ -139,6 +139,26 @@ def get_camera_intrinsics(fov_deg, out_size):
     return f, f, cx, cy
 
 
+def _write_single_view(args):
+    """Worker: render one (pano, yaw, pitch) view and write it to disk.
+
+    Used by the parallel pool; arguments are packed in a tuple so this
+    works with joblib / multiprocessing.Pool without lambda pickling.
+    """
+    equirect, pano_name, fov_deg, yaw, pitch, out_size, output_dir, quality = args
+    persp = equirect_to_perspective(equirect, fov_deg, yaw, pitch, out_size)
+    out_name = f"{pano_name}_y{yaw:+04d}_p{pitch:+03d}.jpg"
+    out_path = os.path.join(output_dir, out_name)
+    cv2.imwrite(out_path, persp, [cv2.IMWRITE_JPEG_QUALITY, quality])
+    return {
+        "filename": out_name,
+        "source_pano": pano_name,
+        "yaw": yaw,
+        "pitch": pitch,
+        "fov": fov_deg,
+    }
+
+
 def process_panorama(pano_path, output_dir, fov_deg, out_size, directions, pano_idx,
                      total_panos, quality):
     """处理一张全景图，输出多张透视图"""
@@ -274,6 +294,8 @@ def main():
     parser.add_argument("--quality", type=int, default=95, help="JPEG 输出质量 (默认 95)")
     parser.add_argument("--ext", type=str, default="jpg,jpeg,png,tif,tiff",
                         help="输入文件扩展名过滤 (逗号分隔)")
+    parser.add_argument("--workers", type=int, default=0,
+                        help="并行 worker 数 (0=auto, CPU 核数-1)")
     args = parser.parse_args()
 
     # 解析视角方向
@@ -311,14 +333,35 @@ def main():
     print(f"预计总输出: {len(pano_files) * len(directions)} 张")
     print()
 
-    # 处理每张全景
+    # 处理每张全景 — 并行: 一张全景一次只解码一次, 然后并行渲染 14 个 view
+    import time
+    from multiprocessing import Pool, cpu_count
+
+    n_workers = args.workers if args.workers > 0 else max(1, cpu_count() - 1)
+    print(f"使用 {n_workers} 个并行 worker")
+
     all_metadata = []
-    for idx, pano_file in enumerate(pano_files):
-        results = process_panorama(
-            pano_file, args.output, args.fov, out_size,
-            directions, idx, len(pano_files), args.quality,
-        )
-        all_metadata.extend(results)
+    t0 = time.time()
+    with Pool(n_workers) as pool:
+        for idx, pano_file in enumerate(pano_files):
+            pano_name = Path(pano_file).stem
+            equirect = cv2.imread(str(pano_file))
+            if equirect is None:
+                print(f"  [WARN] 无法读取: {pano_file}, 跳过")
+                continue
+            h, w = equirect.shape[:2]
+            print(f"  [{idx+1}/{len(pano_files)}] {pano_name} ({w}x{h}) → {len(directions)} 透视图",
+                  flush=True)
+            tasks = [
+                (equirect, pano_name, args.fov, yaw, pitch, out_size, args.output, args.quality)
+                for yaw, pitch in directions
+            ]
+            # imap_unordered 让 worker 一边完成一边返回, 顺序无所谓 (我们最后按文件名取顺序)
+            for meta in pool.imap_unordered(_write_single_view, tasks, chunksize=2):
+                all_metadata.append(meta)
+
+    elapsed = time.time() - t0
+    print(f"\n并行处理完成: {len(all_metadata)} 张, 用时 {elapsed:.1f}s")
 
     # 保存元数据
     meta_path = os.path.join(os.path.dirname(args.output), "pano_metadata.json")

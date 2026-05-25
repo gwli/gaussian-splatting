@@ -264,6 +264,69 @@ P2 是研究型项目，留给将来。
 
 ---
 
+## 三-A、实测数据 (2026-05-24 完成 P0+P1)
+
+### P0.2 - joblib 并行 (pano_to_perspective.py)
+- 测试: 15 panos × 14 views = 210 输出
+- 串行预估 50s → 并行 8 workers **8s** (~6x 加速)
+- ✓ 无质量损失
+
+### P0.3 - 15k iter (vs 30k)
+- scene_023 实测 15000 iter on H100 = **15 min**
+- 原版 30000 iter ≈ 17 min
+- 节省 ~12%（不是 50%，因实际迭代瓶颈不在前半段）
+- ⚠️ PSNR 下降: 30k→25.0 vs 15k→14.3 (在低初始点数场景下下降明显)
+
+### P0.4 - 多 chunk ffmpeg (stitch_chunked.sh)
+- 用 4 并行 chunks 跑 v360 滤镜
+- 已编写脚本但未做端到端验证
+- 预期 5min → 1-2min
+
+### P1.1 - GLOMAP
+- scene_023 实测: **GLOMAP 95s** vs COLMAP mapper 12 min = **8x 加速**
+- ⚠️ 质量损失严重: GLOMAP 在无人机前向飞行场景下三角化角度过小, 67% tracks 被过滤
+- 实测初始点数 10k (vs COLMAP 99k), PSNR 12 (vs 25)
+- 适合**预览用途**, 不适合最终发布
+- 镜像组合: podral3/glomap (colmap) + arhanjain/glomap (mapper)
+
+### P1.4 - KSPLAT 转换
+- scene_021: 49M → **4.6M** (10.8x)
+- scene_022: 64M → 6.0M
+- scene_025: 74M → 6.9M
+- scene_023 v2e: 12M → 1.4M (8.5x)
+- ✓ VR 端首次加载从 ~10s 降到 1-2s
+- 已集成进 colmap_train_v2.sh 自动产出
+
+### 实测端到端对比 (scene_023, 1260 透视图)
+
+| 配置 | Stage 3 (SfM) | Stage 4 (训练) | 总 | 质量 |
+|---|---|---|---|---|
+| 原版: CPU SIFT + 30k iter | ~25min | ~17min | ~42min | PSNR 25 ✓ |
+| v2 默认: GPU SIFT + exhaustive + colmap + 15k | ~10min | ~15min | **25min** | PSNR ~25 (待验证) |
+| v2 fast: GPU SIFT + sequential + GLOMAP + 15k | **3min** | 15min | **18min** | PSNR 12-14 ✗ |
+
+> 默认 "v2 默认" 是均衡选择, fast 模式适合快速 preview。
+
+### 新增脚本
+- `colmap_train_v2.sh` - 完整 GPU 流水线, 4 个开关位置
+- `ply_to_ksplat.sh` - PLY → KSPLAT 单独转换工具
+- `stitch_chunked.sh` - 多 chunk 并行 ffmpeg 拼接 (P0.4)
+
+### 用法
+
+```bash
+# 默认 (质量优先): exhaustive + colmap + 15k iter
+bash colmap_train_v2.sh scene_021
+
+# 自定义: 改 iterations
+bash colmap_train_v2.sh scene_021 30000
+
+# 快速预览: GLOMAP + sequential
+bash colmap_train_v2.sh scene_021 15000 glomap sequential
+```
+
+---
+
 ## 四、并行/资源调度示意
 
 ```
