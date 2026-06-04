@@ -301,11 +301,26 @@ P2 是研究型项目，留给将来。
 
 | 配置 | Stage 3 (SfM) | Stage 4 (训练) | 总 | 质量 |
 |---|---|---|---|---|
-| 原版: CPU SIFT + 30k iter | ~25min | ~17min | ~42min | PSNR 25 ✓ |
-| v2 默认: GPU SIFT + exhaustive + colmap + 15k | ~10min | ~15min | **25min** | PSNR ~25 (待验证) |
-| v2 fast: GPU SIFT + sequential + GLOMAP + 15k | **3min** | 15min | **18min** | PSNR 12-14 ✗ |
+| 原版: CPU SIFT + 30k iter | ~15min | ~17min | ~32min | PSNR 25 ✓ 977 imgs |
+| v2g 质量: GPU SIFT + exhaustive + colmap + 15k | **2.6h** | 18min | ~3h | PSNR 18 ✗ 1149 imgs |
+| v2e 快速: GPU SIFT + sequential + colmap + 15k | 5min | 15min | **21min** | PSNR 14 ✗ 174 imgs |
+| v2 GLOMAP: GPU SIFT + sequential + GLOMAP + 15k | **3min** | 15min | **18min** | PSNR 12-14 ✗ |
 
-> 默认 "v2 默认" 是均衡选择, fast 模式适合快速 preview。
+> ⚠️ **重要发现**: GPU exhaustive_matcher 在 COLMAP 4.x (colmap/colmap:latest 镜像) 反而比 CPU 慢很多 (5134s vs ~3min 原版 CPU)。原因待查 (可能 GPU 实现 bug 或 --FeatureMatching.use_gpu 1 未实际命中 GPU 内核)。
+
+### 真正的胜利
+- ✅ **P0.2 (joblib)**: Stage 2 6 倍加速, 0 质量损失
+- ✅ **P1.4 (KSPLAT)**: PLY 缩小 10 倍, VR 加载快 5 倍, 0 质量损失
+
+### 待权衡的优化 (速度↑ 质量↓)
+- ⚠️ **P0.3 (15k vs 30k)**: 节省训练 2-3 min, 但 PSNR 下降 5-7 个点
+- ⚠️ **P1.1 (GLOMAP)**: SfM 8x 加速, 但 67% tracks 被过滤掉, 适合 preview 而非发布
+- ⚠️ **Sequential matcher**: 5x 匹配加速, 但漏掉大量图对, 重建图像数 1149→174
+
+### 现实结论
+v2 流水线提供了**质量 vs 速度的明确开关**, 但目前没有一个组合**同时**比原版快又质量更好。
+
+要真正快+好, 需要 P2 级方案: **VGGT/DUSt3R** (DL-based SfM, 秒级且全分辨率重建)。
 
 ### 新增脚本
 - `colmap_train_v2.sh` - 完整 GPU 流水线, 4 个开关位置
