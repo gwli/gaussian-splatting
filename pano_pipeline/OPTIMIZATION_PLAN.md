@@ -212,6 +212,35 @@ node util/create-ksplat.js \
 - 这些模型对训练分布外的数据（如 8K 全景拆出的透视图）泛化可能不如 COLMAP
 - 大场景（>500 张图）可能 OOM
 
+##### ✅ P2.1 已实现并验证 (2026-06-08) — VGGT
+
+实现在 `pano_pipeline/vggt_sfm.sh` + `p2_vggt/`（详见 `p2_vggt/README.md`）。
+
+**scene_023 实测 (140 帧)：**
+
+| | COLMAP 原版 | COLMAP v2g (exhaustive) | **VGGT** |
+|---|---|---|---|
+| Stage 3 (SfM) | ~15 min | ~2.6 h | **96 s** |
+| 初始点数 | ~100k | 119k | 100k |
+| PSNR @7k iter | ~20 | 18 | **23.0** |
+| Stage 4 (15k iter) | ~17 min | 18 min | 9 min |
+| **总计** | ~32 min | ~3 h | **~10.5 min** |
+
+> **VGGT 是第一个"又快又好"的配置** — Stage 3 比 COLMAP 快 10-100x, 质量持平甚至更好。
+> P0/P1 的开关只能用质量换速度, VGGT 同时改善两者。这是整个优化计划的最大突破。
+
+**踩过的坑（已在脚本中解决）：**
+1. demo_colmap.py 顶部硬 import lightglue → 改惰性 import（脚本自动 patch）
+2. pycolmap 必须 `==3.10.0`（新版 Image API 不兼容）
+3. `--conf_thres_value` 默认 5.0 会把低纹理无人机图的点**全部过滤** → 0 点；降到 1.5
+4. VGGT 跨帧全局 attention，显存 O(N²) → 子采样到 ≤150 帧（80GB）
+5. 权重 4.7GB 在 HuggingFace → 预下载到 host 缓存, seed 进容器 TORCH_HOME
+
+**剩余工作：**
+- 大场景 (>150 帧) 需 chunk / sliding-window
+- `--use_ba` 模式（LightGlue+pyceres）未接入, 可进一步提精度
+- 仅在 scene_023 验证, 其他场景待批量跑
+
 #### P2.2 实时流式重建（在飞行中重建）
 
 参考 **MASt3R-SLAM**：边飞边重建，无人机降落时已有粗模型。

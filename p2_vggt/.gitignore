@@ -1,0 +1,5 @@
+# Third-party VGGT repo (cloned at setup, auto-patched by vggt_sfm.sh)
+vggt/
+
+# 4.7 GB model checkpoint (download from HuggingFace, see README.md)
+weights/
