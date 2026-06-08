@@ -133,12 +133,33 @@ docker run --rm --gpus all --ipc=host --ulimit memlock=-1 --ulimit stack=6710886
             submodules/simple-knn \
             submodules/fused-ssim > /dev/null 2>&1
         S=/workspace/gaussian-splatting/data/8kpano/scenes/$SCENE_NAME/vggt
-        python train.py -s \$S -m \$S/output \
+        # --eval holds out every 8th camera as a test set for honest metrics
+        python train.py -s \$S -m \$S/output --eval \
             --iterations ${ITERATIONS} --save_iterations ${ITERATIONS} 2>&1 | \
             grep -E 'ITER|PSNR|Saving|Training complete|Number of|Output' | tail -8
     " 2>&1 | tail -12
 END_T4=$(date +%s)
 echo "  Stage 4 total: $((END_T4 - START_T4))s"
+
+# --- Stage 4b: render held-out test views + compute PSNR/SSIM/LPIPS ---
+echo "[Stage 4b] Eval on held-out test views (render + metrics)..."
+docker run --rm --gpus all --ipc=host --ulimit memlock=-1 --ulimit stack=67108864 \
+    --user 0:0 \
+    -e TORCH_HOME=/wcache \
+    -v $ROOT:/workspace/gaussian-splatting \
+    -v $ROOT/p2_vggt/weights:/wcache_src:ro \
+    $PYTORCH_IMAGE \
+    bash -c "
+        set -e
+        # seed lpips VGG weights cache dir (downloaded from download.pytorch.org if absent)
+        mkdir -p /wcache/hub/checkpoints
+        cd /workspace/gaussian-splatting
+        pip install -q --no-deps plyfile opencv-python joblib \
+            submodules/diff-gaussian-rasterization submodules/simple-knn submodules/fused-ssim > /dev/null 2>&1
+        S=/workspace/gaussian-splatting/data/8kpano/scenes/$SCENE_NAME/vggt
+        python render.py -m \$S --skip_train 2>&1 | grep -E 'Rendering|Found|test' | tail -5
+        python metrics.py -m \$S 2>&1 | grep -E 'SSIM|PSNR|LPIPS|Scene' | tail -8
+    " 2>&1 | grep -vE "DEPRECATION|notice|already satisfied" | tail -12
 
 PLY=$WORK/output/point_cloud/iteration_${ITERATIONS}/point_cloud.ply
 if [ -f "$PLY" ]; then
