@@ -23,11 +23,12 @@ Direct-pano trains on 90 panoramas (14× fewer images) yet beats the
 perspective pipeline on every scene.
 
 ## Priority 2 — Make the pano pipeline one-click
-- ☐ **T-B1** GPU panorama stitch (replace CPU v360 ~30min/scene): validate
-  `stitch_chunked.sh` end-to-end and/or a kornia/torch GPU equirect path.
-- ☐ **T-B2** Single entrypoint `run_pano_e2e.sh <scene> <insv>` chaining
-  stitch→crop→VGGT→pose→train→ksplat with per-stage timing JSON.
-- ☐ **T-B3** WebXR viewer: add a `pano` source/button for `*_pano` scenes.
+- ◐ **T-B1** Faster stitch (CPU v360 ~30min/scene): validate `stitch_chunked.sh`
+  parallel-CPU chunks end-to-end (safe ~3-4×); true GPU equirect deferred
+  (fisheye-model geometry-matching risk).
+- ☑ **T-B2** `run_pano_e2e.sh <scene> <insv>` — stitch→crop→VGGT→pose→train→
+  ksplat with per-stage timings.json.
+- ☑ **T-B3** WebXR viewer `?source=pano` + PANO button (validated over HTTPS).
 
 ## Priority 3 — Training speed
 - ☐ **T-C1** P1.2: evaluate gsplat as the training backend (1.5–2× faster).

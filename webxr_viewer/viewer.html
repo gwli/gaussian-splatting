@@ -48,6 +48,7 @@
     <span style="color:#888;margin-left:10px">Source:</span>
     <a href="#" id="srcColmap">COLMAP</a>
     <a href="#" id="srcVggt">VGGT</a>
+    <a href="#" id="srcPano">PANO</a>
   </div>
 
   <script>
@@ -101,20 +102,21 @@
     const customUrl = params.get('ply') || params.get('url');
     // Default to .ksplat (10x smaller than PLY, native format for this viewer)
     const format = params.get('format') || 'ksplat';
-    // source: colmap (output/, 30k iter) | vggt (vggt/output/, 15k iter)
+    // source: colmap (output/, 30k) | vggt (vggt/output/, 15k) | pano (<scene>_pano/output_pano/, 7k)
     const source = params.get('source') || 'colmap';
-    const SRC = {
-      colmap: { sub: 'output',      iter: params.get('iter') || '30000' },
-      vggt:   { sub: 'vggt/output', iter: params.get('iter') || '15000' },
-    }[source] || { sub: 'output', iter: '30000' };
-    const sceneUrl = customUrl ||
-      `/data/8kpano/scenes/${scene}/${SRC.sub}/point_cloud/iteration_${SRC.iter}/point_cloud.${format}`;
+    function buildUrl(src) {
+      const it = params.get('iter');
+      if (src === 'vggt')  return `/data/8kpano/scenes/${scene}/vggt/output/point_cloud/iteration_${it||'15000'}/point_cloud.${format}`;
+      if (src === 'pano')  return `/data/8kpano/scenes/${scene}_pano/output_pano/point_cloud/iteration_${it||'7000'}/point_cloud.${format}`;
+      return `/data/8kpano/scenes/${scene}/output/point_cloud/iteration_${it||'30000'}/point_cloud.${format}`;
+    }
+    const sceneUrl = customUrl || buildUrl(source);
 
     // Wire source toggle links (preserve current scene)
     document.getElementById('srcColmap').href = `?scene=${scene}&source=colmap`;
     document.getElementById('srcVggt').href = `?scene=${scene}&source=vggt`;
-    if (source === 'vggt') document.getElementById('srcVggt').classList.add('active');
-    else document.getElementById('srcColmap').classList.add('active');
+    document.getElementById('srcPano').href = `?scene=${scene}&source=pano`;
+    document.getElementById('src' + (source.charAt(0).toUpperCase()+source.slice(1)))?.classList.add('active');
 
     document.querySelectorAll('#scenePicker a').forEach(a => {
       if (a.getAttribute('href') === `?scene=${scene}`) a.classList.add('active');
