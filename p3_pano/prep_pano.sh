@@ -29,6 +29,30 @@ docker run --rm --user 0:0 -v $ROOT:/w $PT bash -c "
     --fov 120 --size 1280 --preset standard --quality 92" 2>&1 | tail -2
 echo "  crops: $(ls $D/images/*.jpg | wc -l)"
 
+# --- curate crops to <=300 for VGGT (O(N^2) attention memory); keep panoramas full ---
+echo "[2b] curating crops -> <=300 (<=3/pano, front-first)..."
+mv "$D/images" "$D/images_full"; mkdir "$D/images"
+python3 - "$D/images_full" "$D/images" <<'PY'
+import os, re, glob, shutil, sys
+src, dst = sys.argv[1], sys.argv[2]
+byp = {}
+for f in sorted(glob.glob(src + "/*.jpg")):
+    m = re.search(r"pano_(\d+)_", os.path.basename(f))
+    if m: byp.setdefault(int(m.group(1)), []).append(f)
+cap, per = 300, 3
+# shrink per-pano if too many panos
+while len(byp) * per > cap and per > 1: per -= 1
+tot = 0
+for idx, fs in byp.items():
+    fs = sorted(fs, key=lambda p: (("y+000_p+00" not in p), p))  # front first
+    pick = [fs[0]] + ([fs[len(fs)//2]] if len(fs) > 1 else []) + ([fs[-1]] if len(fs) > 2 else [])
+    for p in pick[:per]:
+        shutil.copy(p, dst); tot += 1
+print(f"  curated {tot} crops over {len(byp)} panos ({per}/pano)")
+PY
+chmod -R 777 "$D/images"
+echo "  curated: $(ls $D/images/*.jpg | wc -l)"
+
 echo "[3/3] VGGT SfM on crops..."
 docker run --rm --gpus all --ipc=host --ulimit memlock=-1 --ulimit stack=67108864 --user 0:0 \
   -e TORCH_HOME=/wcache -v $ROOT:/w -v $ROOT/p2_vggt/weights:/wsrc:ro $PT bash -c "

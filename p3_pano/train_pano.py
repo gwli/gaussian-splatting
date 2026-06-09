@@ -121,10 +121,35 @@ pc_dir = os.path.join(out_dir, f"point_cloud/iteration_{ITERS}")
 os.makedirs(pc_dir, exist_ok=True)
 gaussians.save_ply(os.path.join(pc_dir, "point_cloud.ply"))
 
+try:
+    from lpipsPyTorch import lpips as _lpips
+    HAVE_LPIPS = True
+except Exception:
+    HAVE_LPIPS = False
+
 with torch.no_grad():
-    ps = []
+    ps, ss, lp = [], [], []
     for cam in test_cams:
         color, _, _ = render(cam)
-        ps.append(psnr(color.clamp(0, 1), cam.image).mean().item())
-    print(f"[EVAL] held-out test PSNR = {np.mean(ps):.3f}  over {len(test_cams)} panos")
+        color = color.clamp(0, 1)
+        ps.append(psnr(color, cam.image).mean().item())
+        ss.append(ssim(color, cam.image).item())
+        if HAVE_LPIPS:
+            lp.append(_lpips(color[None], cam.image[None], net_type='vgg').item())
+    res = {
+        "scene": os.path.basename(os.path.dirname(out_dir)) or out_dir,
+        "method": "direct-pano",
+        "iterations": ITERS, "train_res": [W, H],
+        "n_gaussians": int(gaussians.get_xyz.shape[0]),
+        "n_train": len(train_cams), "n_test": len(test_cams),
+        "PSNR": float(np.mean(ps)),
+        "SSIM": float(np.mean(ss)),
+        "LPIPS": (float(np.mean(lp)) if lp else None),
+    }
+    import json as _json
+    with open(os.path.join(out_dir, "results.json"), "w") as f:
+        _json.dump(res, f, indent=1)
+    print(f"[EVAL] held-out test  PSNR={res['PSNR']:.3f}  SSIM={res['SSIM']:.4f}  "
+          f"LPIPS={res['LPIPS'] if res['LPIPS'] is None else round(res['LPIPS'],4)}  "
+          f"over {len(test_cams)} panos")
 print(f"[DONE] N={gaussians.get_xyz.shape[0]} gaussians -> {pc_dir}/point_cloud.ply")
