@@ -1,0 +1,14 @@
+# Cloned upstream (re-clone at setup; see README.md)
+OmniGS/
+
+# glm headers — copied from submodules/diff-gaussian-rasterization/third_party at setup
+diff_gaussian_rasterization_pano/third_party/
+
+# build artifacts
+diff_gaussian_rasterization_pano/build/
+diff_gaussian_rasterization_pano/*.egg-info/
+**/*.so
+__pycache__/
+
+# sanity render outputs
+*.png
