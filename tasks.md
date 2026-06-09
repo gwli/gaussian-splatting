@@ -2,15 +2,25 @@
 
 Status legend: ☐ todo · ◐ in progress · ☑ done
 
-## Priority 1 — Direct-pano batch + full metrics
-- ☐ **T-A1** Wire SSIM/LPIPS into `train_pano.py` (currently PSNR-only): render
-  held-out test views, run `metrics.py`-style PSNR/SSIM/LPIPS, write
-  `results.json` per scene.
-- ☐ **T-A2** `prep_pano.sh`: auto-cap VGGT crop input to ≤300 (≈3/pano with
-  front crop) instead of the manual curation done for scene_023.
-- ☐ **T-A3** Batch direct-pano over the other scenes (021,022,025,026,027,028);
-  collect timings + held-out PSNR/SSIM/LPIPS.
-- ☐ **T-A4** Comparison table: perspective-VGGT vs direct-pano across all scenes.
+## Priority 1 — Direct-pano batch + full metrics  ✅ DONE
+- ☑ **T-A1** SSIM/LPIPS + results.json wired into `train_pano.py`.
+- ☑ **T-A2** `prep_pano.sh` auto-caps VGGT crops to ≤300.
+- ☑ **T-A3** Direct-pano run over all 7 scenes (held-out PSNR/SSIM/LPIPS).
+- ☑ **T-A4** Comparison table (below) — direct-pano wins on all 7 scenes.
+
+### T-A4 results: perspective-VGGT vs direct-pano (held-out, 12 test panos/scene)
+| scene | persp PSNR | **pano PSNR** | pano SSIM | pano LPIPS |
+|---|---|---|---|---|
+| 021 | 18.67 | **21.61** | 0.795 | 0.422 |
+| 022 | 19.94 | **22.48** | 0.792 | 0.408 |
+| 023 | 17.05 | **19.55** | 0.693 | 0.475 |
+| 025 | 19.00 | **20.04** | 0.718 | 0.441 |
+| 026 | 18.25 | **19.55** | 0.682 | 0.479 |
+| 027 | 16.24 | **19.69** | 0.672 | 0.530 |
+| 028 | 18.22 | **21.09** | 0.664 | 0.555 |
+| **avg** | **18.05** | **20.43 (+2.4 dB)** | 0.717 | 0.473 |
+Direct-pano trains on 90 panoramas (14× fewer images) yet beats the
+perspective pipeline on every scene.
 
 ## Priority 2 — Make the pano pipeline one-click
 - ☐ **T-B1** GPU panorama stitch (replace CPU v360 ~30min/scene): validate
