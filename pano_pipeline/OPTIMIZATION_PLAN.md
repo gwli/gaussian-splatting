@@ -172,6 +172,26 @@ pip install gsplat
 
 **预期收益**：理想情况下整条流水线快 5-10 倍。**但**改造成本高。
 
+##### ✅ P1.3 已实现并验证 (2026-06-09) — 端到端跑通
+
+实现在 `p3_pano/`（详见 `p3_pano/README.md`）。把 OmniGS 的 equirect(LONLAT)
+CUDA 光栅化器移植成 pip 扩展 `diff_gaussian_rasterization_pano`，写了全景
+data loader（从 VGGT 透视裁剪反推每张全景位姿）+ `train_pano.py` 直接全景训练。
+
+**scene_023 实测（held-out test，每 8 张全景留 1）：**
+
+| | 透视管线 (VGGT 裁剪) | **直接全景** |
+|---|---|---|
+| 训练图像 | 1260 透视裁剪 | **90 全景图 (14x 少)** |
+| held-out PSNR | 17.05 | **19.12** |
+| 光栅化器 | 针孔 | equirect (移植 OmniGS) |
+
+> **直接全景训练在 held-out PSNR 上追平/超过透视管线，同时训练图像少 14x、
+> 每个视角渲染完整 360°** — P1.3 论点端到端验证成立。
+
+**移植踩坑**（已解决，见 p3_pano/README）：`M_*f32` 宏触发 nvcc ICE、
+pycolmap==3.10、cstdint per-file、VGGT 显存 O(N²) 需裁剪 crops ≤300。
+
 #### P1.4 PLY → KSPLAT 转换（VR 加载提速 3 倍）
 
 mkkellogg 的 GaussianSplats3D 支持 `.ksplat`（K-D tree splat）格式，比 PLY 小 2-3 倍、解码快 5 倍：

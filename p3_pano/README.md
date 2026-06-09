@@ -48,15 +48,38 @@ pip install --no-deps -e diff_gaussian_rasterization_pano
   signature horizon band + pole stretch). Confirms the ported forward + the
   Python autograd wrapper work end-to-end.
 
-### Remaining (P1.3b/c)
-- Per-panorama camera poses: each pano's 14 crops share a camera center;
-  recover pano pose from a crop's VGGT extrinsic by removing the known
-  yaw/pitch offset (encoded in the crop filename). Point cloud reused from the
-  existing `scenes/<S>/vggt/sparse/0`.
-- Equirect `Camera` + panorama dataloader (no FoV/projection; just W2V + campos).
-- `train_pano.py` wiring the pano rasterizer; train one scene directly on
-  panoramas; compare data volume / time / held-out metrics vs the
-  perspective-crop VGGT pipeline.
+- ✅ **P1.3b pose derivation** (`make_pano_dataset.py`): per-pano camera =
+  `R_wp = R_off(yaw,pitch) · R_v` (R_off from the crop filename, R_v from VGGT),
+  center = mean of the pano's crops. 90/90 panos recovered.
+- ✅ **P1.3c direct-pano training** (`train_pano.py`, reuses GaussianModel +
+  densification, LONLAT render): converges (loss 0.11→0.04).
+
+### Results — scene_023 (held-out test, every-8th-pano holdout)
+
+| | Perspective (VGGT crops) | **Direct-pano** |
+|---|---|---|
+| training images | 1260 crops | **90 panoramas (14× fewer)** |
+| held-out PSNR | 17.05 | **19.12** |
+| rasterizer | pinhole | equirect (ported OmniGS LONLAT) |
+| SfM | VGGT (per-crop) | VGGT (270 curated crops) → per-pano poses |
+
+Direct-panorama training matches/beats the perspective pipeline on held-out
+PSNR while training on **14× fewer images** and rendering the full 360° per
+view — validating the P1.3 thesis end to end.
+
+### Pipeline (one scene, from .insv)
+```bash
+bash p3_pano/prep_pano.sh scene_023 VID_20260326_073432_023.insv 90   # stitch(kept)+crop+VGGT
+# curate crops to <=300 for VGGT memory, then:
+python p3_pano/make_pano_dataset.py <scene_pano_dir> pano_cams.json    # per-pano poses
+python p3_pano/train_pano.py pano_cams.json <out> 7000 1024            # direct equirect train + eval
+```
+
+### Remaining / future
+- Re-stitch is CPU-bound (~30 min/scene for v360); a GPU stitch (P0.4) would help.
+- `prep_pano.sh` should cap crops fed to VGGT at ≤300 automatically (done
+  manually here).
+- Batch the other scenes; tune conf_thres / iters per scene.
 
 ## `pano_render.py`
 
