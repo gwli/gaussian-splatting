@@ -233,8 +233,36 @@ node util/create-ksplat.js \
 1. demo_colmap.py 顶部硬 import lightglue → 改惰性 import（脚本自动 patch）
 2. pycolmap 必须 `==3.10.0`（新版 Image API 不兼容）
 3. `--conf_thres_value` 默认 5.0 会把低纹理无人机图的点**全部过滤** → 0 点；降到 1.5
-4. VGGT 跨帧全局 attention，显存 O(N²) → 子采样到 ≤150 帧（80GB）
+4. VGGT 跨帧全局 attention，显存 O(N²) → 子采样到 ≤300 帧（80GB 实测上限确认）
 5. 权重 4.7GB 在 HuggingFace → 预下载到 host 缓存, seed 进容器 TORCH_HOME
+
+##### ✅ 全场景批量验证 (2026-06-08) — 7/7 成功，含 COLMAP 失败场景
+
+`max_frames=300` 批量跑全部 7 个场景，训练带 `--eval`（每 8 帧留 1 作 held-out
+test），用 `metrics.py` 算 **15k iter 的真实 held-out 指标**（非 train-view）。
+
+| 场景 | COLMAP 结果 | VGGT SfM | 初始点 | **PSNR** | **SSIM** | **LPIPS** |
+|---|---|---|---|---|---|---|
+| scene_021 | ✓ PSNR25(train) | 149s | 13.4k | 18.67 | 0.746 | 0.486 |
+| scene_022 | ✓ | 151s | 19.4k | 19.94 | 0.748 | 0.474 |
+| scene_023 | ✓ | 140s | 100k | 17.05 | 0.683 | 0.511 |
+| scene_025 | ✓ | 153s | 100k | 19.00 | 0.736 | 0.480 |
+| **scene_026** | ✗ **失败** | 153s | 100k | 18.25 | 0.679 | 0.515 |
+| **scene_027** | ✗ **失败** | 153s | 100k | 16.24 | 0.640 | 0.549 |
+| **scene_028** | ✗ **失败** | 153s | 100k | 18.22 | 0.618 | 0.582 |
+| 均值 | — | ~150s | — | **18.05** | **0.693** | **0.514** |
+
+**两个关键结论：**
+1. **VGGT 挽救了 COLMAP 完全失败的 026/027/028**（起飞→巡航→降落型轨迹，
+   COLMAP 找不到初始图像对）。feed-forward 逐帧预测位姿，不依赖初始对，
+   是这类断裂轨迹的唯一可行方案。整条 SfM 仅 ~150s/场景。
+2. **这些是诚实的 held-out test 指标**（PSNR ~18, 比之前 train-view 的 23 低）。
+   `--eval` 揭示了之前 train-view PSNR 偏乐观。对于低重叠的航拍透视裁剪图，
+   PSNR 16-20 属合理水平；要更高需 P1.3（直接全景训练）或更密航线（见
+   FLIGHT_PLANNING.md）。
+
+**全部产物**：每个场景 `vggt/output/.../iteration_15000/point_cloud.{ply,ksplat}`，
+WebXR viewer 用 `?source=vggt` 浏览。
 
 **剩余工作：**
 - 大场景 (>150 帧) 需 chunk / sliding-window
