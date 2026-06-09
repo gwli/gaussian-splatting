@@ -157,8 +157,8 @@ docker run --rm --gpus all --ipc=host --ulimit memlock=-1 --ulimit stack=6710886
         pip install -q --no-deps plyfile opencv-python joblib \
             submodules/diff-gaussian-rasterization submodules/simple-knn submodules/fused-ssim > /dev/null 2>&1
         S=/workspace/gaussian-splatting/data/8kpano/scenes/$SCENE_NAME/vggt
-        python render.py -m \$S --skip_train 2>&1 | grep -E 'Rendering|Found|test' | tail -5
-        python metrics.py -m \$S 2>&1 | grep -E 'SSIM|PSNR|LPIPS|Scene' | tail -8
+        python render.py -m \$S/output --skip_train 2>&1 | grep -E 'Rendering|Found|test' | tail -5
+        python metrics.py -m \$S/output 2>&1 | grep -E 'SSIM|PSNR|LPIPS|Scene' | tail -8
     " 2>&1 | grep -vE "DEPRECATION|notice|already satisfied" | tail -12
 
 PLY=$WORK/output/point_cloud/iteration_${ITERATIONS}/point_cloud.ply
