@@ -42,11 +42,15 @@ perspective pipeline on every scene.
 ## Backlog — correctness / ops
 - ☐ **T-D1** Investigate GPU `exhaustive_matcher` 85-min slowness (real bug).
 - ☐ **T-D2** Adaptive `conf_thres` (percentile of depth-conf) instead of fixed 1.5.
-- ☐ **T-D3** per-stage timing JSON + optional Prometheus/Grafana.
+- ☑ **T-D3** per-stage timing JSON — `run_pano_e2e.sh` writes `timings.json`
+  (prep/pose/train/ksplat). Grafana not wired (overkill for batch use).
 - ☐ **T-D4** VGGT >300 frames: sliding-window / chunked attention for big scenes.
 - ☐ **T-D5** VGGT `--use_ba` (LightGlue+pyceres) path for higher accuracy.
-- ☐ **T-D6** Clean `submodules/simple-knn` dirty state.
-- ☐ **T-D7** License: OmniGS GPLv3 mixed into repo — document/segregate clearly.
+- ☑ **T-D6** Submodule dirty state cleaned — build/egg-info/.omc excluded via
+  each built submodule's local `info/exclude`; superproject status clean.
+- ☑ **T-D7** License segregated — `p3_pano/LICENSE-NOTICE.md` documents the
+  GPLv3 (OmniGS-derived) component is isolated under `p3_pano/` and must not be
+  redistributed under the INRIA non-commercial license.
 
 ## Research (P2, deferred)
 - ☐ **T-E1** P2.2 streaming/SLAM reconstruction (MASt3R-SLAM).
