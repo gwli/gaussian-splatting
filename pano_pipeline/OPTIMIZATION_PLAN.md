@@ -134,6 +134,14 @@ GLOMAP 已有官方 docker image `colmap/glomap:latest`。
 
 #### P1.2 用 gsplat 替换 INRIA 训练代码（节省 30-50% Stage 4）
 
+##### ✅ P1.2 micro-bench (2026-06-10) — gsplat 3.42x 更快
+`p3_pano/bench_raster.py`，相同 100k 高斯 @1024² fwd+bwd：
+- gsplat 1.5.3: **243 iter/s** (4.11 ms/iter)
+- INRIA diff-gaussian-rasterization: 71 iter/s (14.07 ms/iter)
+- **gsplat 快 3.42x**（超出预期 1.5-2x）。速度案例已证实；完整后端替换
+  （致密化对齐 + 质量）为可选后续工作。
+
+
 [nerfstudio/gsplat](https://github.com/nerfstudio-project/gsplat) 是更优化的 3DGS 训练库：
 
 - 自定义 CUDA kernel，前向/反向都更快

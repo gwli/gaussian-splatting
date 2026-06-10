@@ -33,7 +33,11 @@ perspective pipeline on every scene.
 - ☑ **T-B3** WebXR viewer `?source=pano` + PANO button (validated over HTTPS).
 
 ## Priority 3 — Training speed
-- ☐ **T-C1** P1.2: evaluate gsplat as the training backend (1.5–2× faster).
+- ◑ **T-C1** gsplat backend — **micro-benchmark done, strongly positive**:
+  fwd+bwd on identical 100k gaussians @1024² → gsplat **243 iter/s vs INRIA
+  71 iter/s = 3.42× faster** (beats the expected 1.5–2×). `p3_pano/bench_raster.py`.
+  Full backend swap (densification parity + quality) not wired yet — the speed
+  case is proven; integration is the remaining (optional) work.
 
 ## Backlog — correctness / ops
 - ☐ **T-D1** Investigate GPU `exhaustive_matcher` 85-min slowness (real bug).
