@@ -23,9 +23,11 @@ Direct-pano trains on 90 panoramas (14× fewer images) yet beats the
 perspective pipeline on every scene.
 
 ## Priority 2 — Make the pano pipeline one-click
-- ◐ **T-B1** Faster stitch (CPU v360 ~30min/scene): validate `stitch_chunked.sh`
-  parallel-CPU chunks end-to-end (safe ~3-4×); true GPU equirect deferred
-  (fisheye-model geometry-matching risk).
+- ✗ **T-B1** Faster stitch — **chunking validated NEGATIVE**: 40 frames in 2383s
+  via 4 parallel chunks vs ~21s/frame serial. ffmpeg `v360` is already
+  multi-threaded, so N parallel instances just thrash the same cores (no
+  speedup, slightly worse). True GPU equirect (torch/kornia remap) deferred —
+  carries fisheye-model geometry-matching risk and stitch is a one-time cost.
 - ☑ **T-B2** `run_pano_e2e.sh <scene> <insv>` — stitch→crop→VGGT→pose→train→
   ksplat with per-stage timings.json.
 - ☑ **T-B3** WebXR viewer `?source=pano` + PANO button (validated over HTTPS).
