@@ -66,13 +66,9 @@ def umeyama(src, dst):           # sim3: dst ~ s R src + t  (src,dst: Nx3)
     t = mu_d - s * R @ mu_s
     return s, R, t
 
-# global accumulators
-g_names, g_R, g_t, g_intr = [], [], [], []      # per-image (world2cam in global frame)
-g_pts, g_rgb = [], []
-seen = set()
-name_to_C = {}                                   # global camera centers (for alignment)
-
+# ---- Pass 1: run every window, keep raw per-window reconstructions ----
 starts = list(range(0, max(1, N - OVL), WIN - OVL))
+raw = []
 for wi, st in enumerate(starts):
     wp = paths[st:st + WIN]
     if not wp: continue
@@ -80,38 +76,52 @@ for wi, st in enumerate(starts):
     extr, conf, pts = run_window(wp)
     S = extr.shape[0]
     Cs = np.array([center(extr[i, :, :3], extr[i, :, 3]) for i in range(S)])
+    raw.append(dict(names=names, extr=extr, conf=conf, pts=pts, centers=Cs))
+    print(f"  window {wi}: {S} frames")
 
-    if wi == 0:
-        s, R, t = 1.0, np.eye(3), np.zeros(3)
-    else:
-        shared = [(i, n) for i, n in enumerate(names) if n in name_to_C]
-        if len(shared) < 3:
-            print(f"  window {wi}: only {len(shared)} shared frames, skipping (gap too big)")
-            continue
-        src = np.array([Cs[i] for i, _ in shared])
-        dst = np.array([name_to_C[n] for _, n in shared])
-        s, R, t = umeyama(src, dst)
-        err = np.linalg.norm((s * (R @ src.T).T + t) - dst, axis=1).mean()
-        print(f"  window {wi}: aligned on {len(shared)} frames, sim3 s={s:.3f} resid={err:.4f}")
+# ---- Pass 2: GLOBAL Sim3 pose-graph alignment (T-F3). Spanning-tree init from
+# adjacent windows + loop-closure refinement over ALL window pairs. Falls back to
+# the legacy sequential Umeyama if the solver is unavailable. ----
+xforms = None
+try:
+    from global_sim3 import optimize_global_sim3
+    xforms = optimize_global_sim3(
+        [{"names": r["names"], "centers": r["centers"]} for r in raw],
+        iters=3000, lr=0.02, verbose=True)
+except Exception as e:
+    print(f"  [global_sim3 unavailable: {e}] -> sequential Umeyama fallback")
+    xforms, name_to_C = [], {}
+    for wi, r in enumerate(raw):
+        names, Cs = r["names"], r["centers"]
+        if wi == 0:
+            s, R, t = 1.0, np.eye(3), np.zeros(3)
+        else:
+            sh = [(i, n) for i, n in enumerate(names) if n in name_to_C]
+            if len(sh) < 3:
+                s, R, t = xforms[-1]
+            else:
+                src = np.array([Cs[i] for i, _ in sh]); dst = np.array([name_to_C[n] for _, n in sh])
+                s, R, t = umeyama(src, dst)
+        for i, n in enumerate(names):
+            name_to_C[n] = s * (R @ Cs[i]) + t
+        xforms.append((s, R, t))
 
-    # transform + accumulate cameras
+# ---- Pass 3: apply per-window Sim3, dedup cameras, accumulate conf-masked pts ----
+g_names, g_R, g_t, g_pts = [], [], [], []
+seen = set()
+for r, (s, R, t) in zip(raw, xforms):
+    names, extr, conf, pts, Cs = r["names"], r["extr"], r["conf"], r["pts"], r["centers"]
     for i, n in enumerate(names):
-        Rc, tc = extr[i, :, :3], extr[i, :, 3]
-        C = Cs[i]
-        Cg = s * (R @ C) + t
-        Rcg = Rc @ R.T
-        tcg = -Rcg @ Cg
-        name_to_C[n] = Cg
         if n in seen: continue
         seen.add(n)
-        g_names.append(n); g_R.append(Rcg); g_t.append(tcg)
-    # transform + accumulate points (conf-masked)
-    H, Wd = conf.shape[1], conf.shape[2]
+        Rc = extr[i, :, :3]
+        Cg = s * (R @ Cs[i]) + t
+        Rcg = Rc @ R.T
+        g_names.append(n); g_R.append(Rcg); g_t.append(-Rcg @ Cg)
     m = conf >= CONF
-    P = pts[m]                                   # (K,3)
+    P = pts[m]
     if P.shape[0]:
-        Pg = (s * (R @ P.T).T + t)
-        g_pts.append(Pg)
+        g_pts.append(s * (R @ P.T).T + t)
 
 print(f"merged: {len(g_names)} cameras, {sum(p.shape[0] for p in g_pts)} raw points")
 np.savez(os.path.join(scene, "vggt_window_merged.npz"),

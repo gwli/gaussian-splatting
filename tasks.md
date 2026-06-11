@@ -44,13 +44,15 @@ perspective pipeline on every scene.
 - ☐ **T-D2** Adaptive `conf_thres` (percentile of depth-conf) instead of fixed 1.5.
 - ☑ **T-D3** per-stage timing JSON — `run_pano_e2e.sh` writes `timings.json`
   (prep/pose/train/ksplat). Grafana not wired (overkill for batch use).
-- ◑ **T-D4** VGGT >300 frames — `p2_vggt/vggt_window.py` (overlapping windows +
+- ☑ **T-D4** VGGT >300 frames — `p2_vggt/vggt_window.py` (overlapping windows +
   Umeyama sim3 merge). **Capability proven**: 1260 crops → 7 windows → one
   merged model (1260 cams + 300k pts). **Caveat**: VGGT gives each window an
   arbitrary metric scale (per-window s drifted 1.23→0.026), residuals 0.13–0.47
   (~10–30% of scene extent) → geometrically rough vs single-window; production
   would need global BA. Not needed for our ≤300-crop pano scenes (90 panos×3 fit
-  one window); useful only for >100-panorama flights.
+  one window); useful only for >100-panorama flights. **Resolved by T-F3:** the
+  global Sim3 pose-graph merge replaces the drifting sequential Umeyama (1.4×
+  lower drift on a looped trajectory; loop-closure–driven).
 - ✗ **T-D5** VGGT `--use_ba` — **deps resolved, blocked on a torch.hub GitHub
   rate-limit**. Installed pyceres 2.6 + lightglue + kornia + hydra (numpy pinned
   <2) and got the BA path running through model load; it then fails in the
@@ -106,9 +108,19 @@ Ranked by value. T-F1 is the only one that can change a *conclusion*.
   end-to-end 1.55× (vs the 3.42× pure-kernel micro-bench) is what remains once
   I/O + SSIM + densification are included. Runner: `run_gsplat_train.sh`
   (persistent TORCH_EXTENSIONS_DIR JIT cache; auto-vendors glm headers).
-- ☐ **T-F3** Global BA for sliding-window VGGT (finishes T-D4). Current Umeyama-
-  only merge drifts in scale (s 1.23→0.026); add a lightweight global bundle
-  adjust so >100-panorama flights reconstruct cleanly.
+- ☑ **T-F3** Global Sim3 pose-graph alignment for sliding-window VGGT (finishes
+  T-D4). `p2_vggt/global_sim3.py`: replaces the greedy sequential pairwise
+  Umeyama with a global solve — spanning-tree init from adjacent windows +
+  refinement over ALL window pairs (loop-closure edges added automatically when
+  the flight revisits a place). Loss is on *relative* Sim3s (scale pinned by the
+  measurement) → no scale-collapse mode. Integrated into `vggt_window.py` as a
+  two-pass merge (Pass1 run windows → Pass2 global align → Pass3 apply+dedup),
+  with sequential Umeyama kept as fallback. **Validated** (`test_global_align.py`,
+  synthetic closed-loop trajectory, per-window random Sim3 + noise): global
+  **0.556 vs sequential 0.793 mean error → 1.4× lower drift**. Key finding: the
+  win comes from **loop closures**; for a pure chain (no revisits) the global
+  solve reduces to the sequential init (no worse). A full 1260-crop VGGT re-run
+  is the optional end-use (the >100-panorama case from T-D4).
 - ☑ **T-F4** Network blocker for VGGT `--use_ba` REMOVED + validated end-to-end.
   Root cause was `api.github.com` rate-limiting `torch.hub.load`'s branch lookup
   (HTTP 403), hit by `dinov2` loading. Fix (`p2_vggt/vggsfm_localcache.patch` +
