@@ -1,0 +1,4 @@
+MASt3R-SLAM/
+*.pth
+*.pkl
+checkpoints/

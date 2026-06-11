@@ -65,7 +65,12 @@ perspective pipeline on every scene.
   redistributed under the INRIA non-commercial license.
 
 ## Research (P2, deferred)
-- ☐ **T-E1** P2.2 streaming/SLAM reconstruction (MASt3R-SLAM).
+- ◑ **T-E1** P2.2 MASt3R-SLAM — **assessed (p4_slam/FEASIBILITY.md)**. Headless
+  + PNG/MP4 input confirmed; 2.9 GB checkpoints downloaded. Blockers: build
+  (lietorch+mast3r+asmk+CUDA ext) pins torch 2.5.1 vs our 2.6 (lietorch build
+  inconclusive/version-mismatch), and it's monocular-*perspective* SLAM vs our
+  360° data. Recommend a separate torch-2.5.1 conda/Docker env if pursued;
+  VGGT already covers our SfM need. Deferred (research-scale).
 - ☐ **T-E2** P2.3 WebGPU in-browser training.
 - ☐ **T-E3** P2.4 LOD chunking for city-scale scenes.
 
