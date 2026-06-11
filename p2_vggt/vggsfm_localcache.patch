@@ -1,0 +1,40 @@
+diff --git a/vggt/dependency/vggsfm_utils.py b/vggt/dependency/vggsfm_utils.py
+index 3f7d9ba..1d847c8 100644
+--- a/vggt/dependency/vggsfm_utils.py
++++ b/vggt/dependency/vggsfm_utils.py
+@@ -4,6 +4,7 @@
+ # This source code is licensed under the license found in the
+ # LICENSE file in the root directory of this source tree.
+ 
++import os
+ import logging
+ import warnings
+ from typing import Dict, List, Optional, Tuple, Union
+@@ -38,6 +39,10 @@ def build_vggsfm_tracker(model_path=None):
+     """
+     tracker = TrackerPredictor()
+ 
++    # Prefer a locally-cached tracker weight (env VGGSFM_TRACKER_PT) to avoid
++    # network at run time — see T-F4 in ../../tasks.md.
++    if model_path is None:
++        model_path = os.environ.get("VGGSFM_TRACKER_PT")
+     if model_path is None:
+         default_url = "https://huggingface.co/facebook/VGGSfM/resolve/main/vggsfm_v2_tracker.pt"
+         tracker.load_state_dict(torch.hub.load_state_dict_from_url(default_url))
+@@ -68,8 +73,14 @@ def generate_rank_by_dino(
+     # Resize images to the target size
+     images = F.interpolate(images, (image_size, image_size), mode="bilinear", align_corners=False)
+ 
+-    # Load DINO model
+-    dino_v2_model = torch.hub.load("facebookresearch/dinov2", model_name)
++    # Load DINO model. Prefer a locally-cloned dinov2 repo (env DINOV2_LOCAL_DIR)
++    # via source="local" to avoid the api.github.com rate-limit (HTTP 403) that
++    # torch.hub.load's branch lookup hits — see T-F4 in ../../tasks.md.
++    _dino_local = os.environ.get("DINOV2_LOCAL_DIR")
++    if _dino_local:
++        dino_v2_model = torch.hub.load(_dino_local, model_name, source="local")
++    else:
++        dino_v2_model = torch.hub.load("facebookresearch/dinov2", model_name)
+     dino_v2_model.eval()
+     dino_v2_model = dino_v2_model.to(device)
+ 

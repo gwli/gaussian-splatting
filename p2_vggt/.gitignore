@@ -3,3 +3,4 @@ vggt/
 
 # 4.7 GB model checkpoint (download from HuggingFace, see README.md)
 weights/
+hub_cache/

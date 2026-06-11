@@ -57,7 +57,9 @@ perspective pipeline on every scene.
   VGGSfM tracker at `torch.hub.load(...)` → `HTTP 403 rate limit exceeded`
   fetching tracker weights from GitHub (sandbox network). Low ROI to chase
   (BA only refines already-good feed-forward poses); feed-forward is what the
-  whole pipeline uses and is sufficient. Deferred.
+  whole pipeline uses and is sufficient. Deferred. **Update (T-F4):** network
+  blocker removed; BA now runs end-to-end but reports "Not enough inliers per
+  frame, skip BA" on our sparse pano-crops — confirmed data-limited, not a bug.
 - ☑ **T-D6** Submodule dirty state cleaned — build/egg-info/.omc excluded via
   each built submodule's local `info/exclude`; superproject status clean.
 - ☑ **T-D7** License segregated — `p3_pano/LICENSE-NOTICE.md` documents the
@@ -107,9 +109,19 @@ Ranked by value. T-F1 is the only one that can change a *conclusion*.
 - ☐ **T-F3** Global BA for sliding-window VGGT (finishes T-D4). Current Umeyama-
   only merge drifts in scale (s 1.23→0.026); add a lightweight global bundle
   adjust so >100-panorama flights reconstruct cleanly.
-- ☐ **T-F4** Unblock T-D5 BA by caching the VGGSfM tracker weights locally
-  (same trick just used for lietorch/eigen): pre-fetch the weights, load from a
-  local path, bypass the `torch.hub.load` GitHub 403.
+- ☑ **T-F4** Network blocker for VGGT `--use_ba` REMOVED + validated end-to-end.
+  Root cause was `api.github.com` rate-limiting `torch.hub.load`'s branch lookup
+  (HTTP 403), hit by `dinov2` loading. Fix (`p2_vggt/vggsfm_localcache.patch` +
+  `run_vggt_ba.sh`): pre-fetch the VGGSfM tracker weight (HuggingFace) +
+  pre-clone dinov2, load tracker via `VGGSFM_TRACKER_PT` and dinov2 via
+  `source="local"` (`DINOV2_LOCAL_DIR`) — zero github API calls. The BA pipeline
+  now runs **fully end-to-end** (model → dino ranking → tracker → fine-tracking
+  across all query frames). **Finding:** on our 60–300 perspective crops it then
+  reports *"Not enough inliers per frame, skip BA"* — the sparse-overlap 360°
+  pano-crops don't yield enough inlier feature tracks for classic BA
+  triangulation. This is **direct evidence** for the T-D5 conclusion: feed-forward
+  VGGT (correspondence-free) is the right tool for this data; classic BA is not
+  just low-ROI but data-limited here.
 - ☑ **T-F5** Engineering cleanup: (a) `run_slam_full.sh --clean` removes the
   multi-GB `mast3r-slam:built` image; (b) `_slam_build.sh` now auto-applies
   `mast3r_slam_patches.diff` (idempotent `git apply --check`) so a fresh clone is
