@@ -1,0 +1,57 @@
+diff --git a/main.py b/main.py
+index 20cfbbc..0ba7a34 100644
+--- a/main.py
++++ b/main.py
+@@ -21,7 +21,15 @@ from mast3r_slam.mast3r_utils import (
+ )
+ from mast3r_slam.multiprocess_utils import new_queue, try_get_msg
+ from mast3r_slam.tracker import FrameTracker
+-from mast3r_slam.visualization import WindowMsg, run_visualization
++# WindowMsg defined locally so headless (--no-viz) runs don't import the GUI
++# stack (imgui/moderngl/in3d); run_visualization is imported lazily below.
++import dataclasses as _dc
++@_dc.dataclass
++class WindowMsg:
++    is_terminated: bool = False
++    is_paused: bool = False
++    next: bool = False
++    C_conf_threshold: float = 1.5
+ import torch.multiprocessing as mp
+ 
+ 
+@@ -187,6 +195,7 @@ if __name__ == "__main__":
+     states = SharedStates(manager, h, w)
+ 
+     if not args.no_viz:
++        from mast3r_slam.visualization import run_visualization
+         viz = mp.Process(
+             target=run_visualization,
+             args=(config, states, keyframes, main2viz, viz2main),
+diff --git a/mast3r_slam/dataloader.py b/mast3r_slam/dataloader.py
+index 35e6f9d..c711f02 100644
+--- a/mast3r_slam/dataloader.py
++++ b/mast3r_slam/dataloader.py
+@@ -4,7 +4,10 @@ import cv2
+ from natsort import natsorted
+ import numpy as np
+ import torch
+-import pyrealsense2 as rs
++try:
++    import pyrealsense2 as rs  # only needed for the live RealSense camera path
++except Exception:
++    rs = None  # libusb / driver absent — fine for file/MP4 datasets
+ import yaml
+ 
+ from mast3r_slam.mast3r_utils import resize_img
+diff --git a/setup.py b/setup.py
+index ee79545..ab85c67 100644
+--- a/setup.py
++++ b/setup.py
+@@ -34,6 +34,7 @@ if has_cuda:
+         "-gencode=arch=compute_75,code=sm_75",
+         "-gencode=arch=compute_80,code=sm_80",
+         "-gencode=arch=compute_86,code=sm_86",
++        "-gencode=arch=compute_90,code=sm_90",  # Hopper (H100/H200) — this machine
+     ]
+     ext_modules = [
+         CUDAExtension(

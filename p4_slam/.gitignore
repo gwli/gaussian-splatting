@@ -3,3 +3,5 @@ MASt3R-SLAM/
 *.pkl
 checkpoints/
 seq_*/
+lietorch_src/
+slam_output_seq023/*.ply

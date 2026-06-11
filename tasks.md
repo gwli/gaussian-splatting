@@ -65,14 +65,19 @@ perspective pipeline on every scene.
   redistributed under the INRIA non-commercial license.
 
 ## Research (P2, deferred)
-- ◑ **T-E1** P2.2 MASt3R-SLAM — **assessed + build de-risked
-  (p4_slam/FEASIBILITY.md)**. Headless + PNG/MP4 input confirmed; 2.9 GB
-  checkpoints downloaded. **Correction:** the build is viable in our torch-2.6
-  container — `lietorch` builds with `--no-build-isolation` (the first failure
-  was pip build-isolation pulling a cu13.0 torch, not a torch-version issue).
-  Remaining: finish mast3r + SLAM CUDA-ext build (flaky logs, not completed) and
-  feed a dense forward-*perspective* stream (it's monocular-perspective SLAM,
-  our data is 360°). VGGT already covers our SfM; this adds streaming. Deferred.
+- ☑ **T-E1** P2.2 MASt3R-SLAM — **build + run BOTH CONFIRMED end-to-end**
+  (`p4_slam/FEASIBILITY.md`, one-shot `p4_slam/run_slam_full.sh`). Runs headless
+  in the torch-2.6/CUDA-12.6 container and produces a TUM trajectory (16 kf
+  poses, `slam_output_seq023/trajectory_tum.txt`) + dense `.ply` at ~3.5 FPS on
+  one H100. Four fixes to get from build→run (all in `mast3r_slam_patches.diff`):
+  (1) faiss-cpu + asmk retrieval stack; (2) made `pyrealsense2` import optional;
+  (3) lazy GUI import (imgui/moderngl/in3d) for `--no-viz`; (4) **sm_90 (Hopper)
+  gencode** — setup.py only had ≤sm_86 → "no kernel image" — plus vendoring
+  eigen locally (gitlab submodule was down). **Finding:** tracking holds for the
+  first overlapping segment (8 kf) then loses lock at frame 16 — our 90 sparse
+  360°-derived crops lack the frame overlap monocular perspective SLAM needs; a
+  real streaming demo wants a dense forward-perspective stream. VGGT already
+  covers our batch SfM; this adds the streaming/while-flying capability.
 - ☐ **T-E2** P2.3 WebGPU in-browser training.
 - ☐ **T-E3** P2.4 LOD chunking for city-scale scenes.
 

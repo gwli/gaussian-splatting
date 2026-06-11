@@ -61,24 +61,46 @@ Full build succeeds in the torch-2.6 / CUDA-12.6 container with
 ternary inside an `import` — not a real import failure; the `backend` import,
 which exercises the compiled ext, succeeded.)
 
-## Run status (2026-06-11)
-Build is confirmed; the headless **run** then surfaces MASt3R-SLAM's
-retrieval/loop-closure stack, which `main.py` imports unconditionally
-(`mast3r_utils -> retrieval_database -> mast3r.retrieval.processor`):
-needs **faiss** + **asmk** (the latter a cython build under
-`thirdparty/mast3r/asmk`). Also a benign warning: RoPE2D CUDA kernel not built
-→ slow pytorch fallback (fine).
+## RUN CONFIRMED — end-to-end (2026-06-11)
+MASt3R-SLAM now **runs headless end-to-end** in our torch-2.6/CUDA-12.6
+container and produces a trajectory + dense point cloud. Reproduce with
+`p4_slam/run_slam_full.sh` (builds a persistent `mast3r-slam:built` image once,
+then runs `main.py --no-viz --dataset p4_slam/seq_023_front --config
+config/base.yaml`).
 
-These are finite, known deps (`faiss-cpu` + building asmk), but each attempt is
-a ~12-min full rebuild and the deps surface one-by-one — a dependency rabbit
-hole. Plus the input caveat stands: 90 sparse forward crops may not track at
-video-rate expectations.
+Getting from "build confirmed" to "runs" took four concrete fixes (all captured
+in `p4_slam/mast3r_slam_patches.diff` + the build scripts):
+1. **Retrieval stack** — `main.py` imports `mast3r.retrieval.processor`
+   unconditionally → needs **faiss-cpu** + **asmk** (asmk's `hamming` cython ext
+   built in place; the `.c` is pre-generated so no cython toolchain needed).
+2. **`pyrealsense2`** import in `dataloader.py` pulled `libusb` (RealSense camera
+   driver we don't use) → made the import optional (`try/except → rs=None`).
+3. **`imgui`/`moderngl`/`in3d` GUI stack** imported at `main.py` top via
+   `visualization` → moved `WindowMsg` to a local dataclass and made
+   `run_visualization` a lazy import (only under non-`--no-viz`).
+4. **CUDA arch** — this machine is **sm_90 (Hopper, H100/H200)** but `setup.py`
+   compiled the `gn`/`matching` kernels only up to sm_86 → `no kernel image is
+   available for execution on the device`. Added `-gencode …compute_90` and
+   built lietorch with `TORCH_CUDA_ARCH_LIST=9.0`.
+   - Side fix: lietorch's pip install clones `eigen` from **gitlab.com**, which
+     was down (502/503). Vendored eigen 3.4.90 from `thirdparty/eigen` into a
+     local `p4_slam/lietorch_src/eigen` and install lietorch `-e` from there —
+     removes the gitlab dependency entirely.
 
-Decision: stopped at **build confirmed + run blocked on faiss/asmk retrieval
-stack**. Finishing the run = install faiss-cpu, build asmk, then
-`main.py --no-viz`; optionally feed a denser perspective stream.
+### Result on our data (`seq_023_front`, 90 forward crops from scene_023 panos)
+- **Tracked + reconstructed the first 16 keyframes** → TUM trajectory
+  (`slam_output_seq023/trajectory_tum.txt`, 16 poses, plausible forward motion)
+  + a 10.8 MB dense point cloud (`reconstruction.ply`, git-ignored — regenerable).
+  Ran at ~3.4–3.8 FPS on one H100.
+- Then **lost tracking at frame 16** and repeatedly "Failed to relocalize"
+  against the 8-keyframe map → "Skipped frame 16", finished cleanly.
+- This is exactly the **predicted domain caveat**: 90 sparse forward-crops from
+  360° panoramas have too little frame-to-frame overlap for monocular
+  perspective SLAM to keep lock. The fix for a real streaming demo is a **denser
+  forward-perspective stream** (re-render the equirect video to perspective at
+  higher fps, or feed the drone's native forward camera), not the sparse panos.
 
-## Status: build CONFIRMED working in-container. Remaining to demonstrate
-streaming: feed a dense forward-**perspective** sequence (PNG folder / mp4) —
-our 360° panoramas need a perspective re-render — and run
-`main.py --no-viz --dataset <seq>`.
+## Status: build + run BOTH CONFIRMED in-container. The streaming-reconstruction
+capability works; demonstrating it across a *full* flight needs dense
+forward-perspective input (our 360° pano sampling is too sparse to track past
+the initial overlapping segment).
