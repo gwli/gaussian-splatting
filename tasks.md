@@ -51,7 +51,13 @@ perspective pipeline on every scene.
   (~10–30% of scene extent) → geometrically rough vs single-window; production
   would need global BA. Not needed for our ≤300-crop pano scenes (90 panos×3 fit
   one window); useful only for >100-panorama flights.
-- ☐ **T-D5** VGGT `--use_ba` (LightGlue+pyceres) path for higher accuracy.
+- ✗ **T-D5** VGGT `--use_ba` — **deps resolved, blocked on a torch.hub GitHub
+  rate-limit**. Installed pyceres 2.6 + lightglue + kornia + hydra (numpy pinned
+  <2) and got the BA path running through model load; it then fails in the
+  VGGSfM tracker at `torch.hub.load(...)` → `HTTP 403 rate limit exceeded`
+  fetching tracker weights from GitHub (sandbox network). Low ROI to chase
+  (BA only refines already-good feed-forward poses); feed-forward is what the
+  whole pipeline uses and is sufficient. Deferred.
 - ☑ **T-D6** Submodule dirty state cleaned — build/egg-info/.omc excluded via
   each built submodule's local `info/exclude`; superproject status clean.
 - ☑ **T-D7** License segregated — `p3_pano/LICENSE-NOTICE.md` documents the
