@@ -6,6 +6,12 @@ set -e
 REPO=/raid/git/gaussian-splatting
 IMG=mast3r-slam:built
 BASE=nvcr.io/nvidia/pytorch:24.12-py3
+
+# `run_slam_full.sh --clean` removes the multi-GB persistent image and exits.
+if [ "$1" = "--clean" ]; then
+  docker image rm -f "$IMG" && echo ">> removed $IMG (reclaimed disk)"; exit 0
+fi
+
 DS=${1:-/w/p4_slam/seq_023_front}
 TAG=${2:-seq023front}
 

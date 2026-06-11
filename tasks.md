@@ -110,9 +110,11 @@ Ranked by value. T-F1 is the only one that can change a *conclusion*.
 - ☐ **T-F4** Unblock T-D5 BA by caching the VGGSfM tracker weights locally
   (same trick just used for lietorch/eigen): pre-fetch the weights, load from a
   local path, bypass the `torch.hub.load` GitHub 403.
-- ☐ **T-F5** Engineering cleanup: (a) document/automate cleanup of the multi-GB
-  `mast3r-slam:built` image; (b) auto-apply `mast3r_slam_patches.diff` via
-  `git apply` in `run_slam_full.sh` so a fresh clone is one-command runnable.
+- ☑ **T-F5** Engineering cleanup: (a) `run_slam_full.sh --clean` removes the
+  multi-GB `mast3r-slam:built` image; (b) `_slam_build.sh` now auto-applies
+  `mast3r_slam_patches.diff` (idempotent `git apply --check`) so a fresh clone is
+  one-command runnable; (c) `p4_slam/SETUP.md` documents the full reproducible
+  setup (clone, checkpoints, vendor eigen→lietorch_src).
 
 ## Done
 - ☑ P0.2 joblib Stage-2 · P0.3 15k-iter · P0.4 chunked-stitch (script) ·
