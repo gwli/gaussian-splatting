@@ -5,3 +5,4 @@ checkpoints/
 seq_*/
 lietorch_src/
 slam_output_seq023/*.ply
+slam_output_seq023_dense/*.ply

@@ -100,7 +100,30 @@ in `p4_slam/mast3r_slam_patches.diff` + the build scripts):
   forward-perspective stream** (re-render the equirect video to perspective at
   higher fps, or feed the drone's native forward camera), not the sparse panos.
 
-## Status: build + run BOTH CONFIRMED in-container. The streaming-reconstruction
-capability works; demonstrating it across a *full* flight needs dense
-forward-perspective input (our 360° pano sampling is too sparse to track past
-the initial overlapping segment).
+## T-F1 — dense forward-perspective stream FIXES tracking (2026-06-11)
+The sparse-pano caveat is now **resolved and quantified**. The raw 380 s flight
+was sampled at only ~0.24 fps for the 90-pano set (1 frame / 4.2 s) — far too
+sparse. `p4_slam/make_dense_perspective.sh` re-extracts a dense forward
+(yaw0/pitch0) perspective stream straight from the `.insv` in one ffmpeg decode
+(dual-fisheye→equirect→flat), then `run_slam_full.sh` runs on it.
+
+Dense run (`seq_023_dense`, first 90 s @ 4 fps = 360 frames):
+
+| metric | sparse (90 panos, ~0.24 fps) | dense (360 frames, 4 fps) |
+|---|---|---|
+| keyframe poses in trajectory | 16 | **107** (6.7×) |
+| dense point cloud | 10.8 MB | **59 MB** (5.5×) |
+| first tracking loss | frame 16 (~67 s) | **none until frame ~116** |
+| skipped frames | many (relocalize thrash) | **1** (frame 116, the tail) |
+| run speed | ~3.5 FPS | ~7 FPS |
+
+So MASt3R-SLAM tracks the segment **continuously** when fed a dense perspective
+stream — the earlier loss-at-frame-16 was purely an input-sampling artifact, not
+a capability limit. Trajectory saved to
+`slam_output_seq023_dense/trajectory_tum.txt` (107 poses); 59 MB `.ply`
+git-ignored (regenerable). Scaling to the full 380 s flight is just a longer
+`make_dense_perspective.sh` segment (stitch cost is the only constraint).
+
+## Status: build + run + **dense-stream tracking** all CONFIRMED. MASt3R-SLAM
+delivers streaming/while-flying reconstruction on this drone's data given a
+dense forward-perspective feed; VGGT still covers batch SfM from the panos.

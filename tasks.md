@@ -81,6 +81,29 @@ perspective pipeline on every scene.
 - ☐ **T-E2** P2.3 WebGPU in-browser training.
 - ☐ **T-E3** P2.4 LOD chunking for city-scale scenes.
 
+## Priority 4 — improvements (added 2026-06-11)
+Ranked by value. T-F1 is the only one that can change a *conclusion*.
+- ☑ **T-F1** Dense forward-perspective stream — **FIXES tracking, conclusion
+  changed**. `make_dense_perspective.sh` re-extracts a dense forward view from
+  the raw `.insv` (dual-fisheye→equirect→flat in one ffmpeg pass). Dense run
+  (360 frames @4 fps over first 90 s) vs sparse (90 panos @0.24 fps):
+  **107 keyframe poses vs 16** (6.7×), 59 MB vs 10.8 MB cloud, **continuous
+  tracking until frame ~116 with only 1 skipped frame** vs relocalize-thrash
+  from frame 16. The loss-at-frame-16 was a sampling artifact, not a capability
+  limit. Trajectory: `p4_slam/slam_output_seq023_dense/trajectory_tum.txt`.
+- ☐ **T-F2** Wire gsplat backend into the training loop (finishes T-C1). Micro-
+  bench proved 3.42×; remaining is densification parity + held-out quality
+  check so the speedup is real end-to-end, not just a kernel benchmark.
+- ☐ **T-F3** Global BA for sliding-window VGGT (finishes T-D4). Current Umeyama-
+  only merge drifts in scale (s 1.23→0.026); add a lightweight global bundle
+  adjust so >100-panorama flights reconstruct cleanly.
+- ☐ **T-F4** Unblock T-D5 BA by caching the VGGSfM tracker weights locally
+  (same trick just used for lietorch/eigen): pre-fetch the weights, load from a
+  local path, bypass the `torch.hub.load` GitHub 403.
+- ☐ **T-F5** Engineering cleanup: (a) document/automate cleanup of the multi-GB
+  `mast3r-slam:built` image; (b) auto-apply `mast3r_slam_patches.diff` via
+  `git apply` in `run_slam_full.sh` so a fresh clone is one-command runnable.
+
 ## Done
 - ☑ P0.2 joblib Stage-2 · P0.3 15k-iter · P0.4 chunked-stitch (script) ·
   P1.1 GLOMAP (opt-in) · P1.4 KSPLAT
