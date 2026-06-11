@@ -44,7 +44,13 @@ perspective pipeline on every scene.
 - ☐ **T-D2** Adaptive `conf_thres` (percentile of depth-conf) instead of fixed 1.5.
 - ☑ **T-D3** per-stage timing JSON — `run_pano_e2e.sh` writes `timings.json`
   (prep/pose/train/ksplat). Grafana not wired (overkill for batch use).
-- ☐ **T-D4** VGGT >300 frames: sliding-window / chunked attention for big scenes.
+- ◑ **T-D4** VGGT >300 frames — `p2_vggt/vggt_window.py` (overlapping windows +
+  Umeyama sim3 merge). **Capability proven**: 1260 crops → 7 windows → one
+  merged model (1260 cams + 300k pts). **Caveat**: VGGT gives each window an
+  arbitrary metric scale (per-window s drifted 1.23→0.026), residuals 0.13–0.47
+  (~10–30% of scene extent) → geometrically rough vs single-window; production
+  would need global BA. Not needed for our ≤300-crop pano scenes (90 panos×3 fit
+  one window); useful only for >100-panorama flights.
 - ☐ **T-D5** VGGT `--use_ba` (LightGlue+pyceres) path for higher accuracy.
 - ☑ **T-D6** Submodule dirty state cleaned — build/egg-info/.omc excluded via
   each built submodule's local `info/exclude`; superproject status clean.
