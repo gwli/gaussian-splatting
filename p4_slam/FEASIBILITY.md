@@ -50,5 +50,35 @@ So the build is **viable in our torch-2.6 container** with `--no-build-isolation
   reconstruction, which is the next step if that capability is wanted.
 - Assets cached under `p4_slam/MASt3R-SLAM/checkpoints/` (git-ignored, 2.9 GB).
 
-## Status: build de-risked (lietorch builds in-container); full build + a
-perspective-stream run is the remaining work to demonstrate streaming.
+## Build CONFIRMED (2026-06-11)
+Full build succeeds in the torch-2.6 / CUDA-12.6 container with
+`--no-build-isolation`:
+- `lietorch` 0.3 — built + imports
+- `thirdparty/mast3r` (+ `roma`) — editable install OK
+- MASt3R-SLAM package incl. the `gn_kernels.cu`/`matching_kernels.cu` CUDA ext —
+  `import mast3r_slam.backend` → **"backend ok"**.
+(An `IMPORTS_OK` line was missing only due to a typo in my test string — a bad
+ternary inside an `import` — not a real import failure; the `backend` import,
+which exercises the compiled ext, succeeded.)
+
+## Run status (2026-06-11)
+Build is confirmed; the headless **run** then surfaces MASt3R-SLAM's
+retrieval/loop-closure stack, which `main.py` imports unconditionally
+(`mast3r_utils -> retrieval_database -> mast3r.retrieval.processor`):
+needs **faiss** + **asmk** (the latter a cython build under
+`thirdparty/mast3r/asmk`). Also a benign warning: RoPE2D CUDA kernel not built
+→ slow pytorch fallback (fine).
+
+These are finite, known deps (`faiss-cpu` + building asmk), but each attempt is
+a ~12-min full rebuild and the deps surface one-by-one — a dependency rabbit
+hole. Plus the input caveat stands: 90 sparse forward crops may not track at
+video-rate expectations.
+
+Decision: stopped at **build confirmed + run blocked on faiss/asmk retrieval
+stack**. Finishing the run = install faiss-cpu, build asmk, then
+`main.py --no-viz`; optionally feed a denser perspective stream.
+
+## Status: build CONFIRMED working in-container. Remaining to demonstrate
+streaming: feed a dense forward-**perspective** sequence (PNG folder / mp4) —
+our 360° panoramas need a perspective re-render — and run
+`main.py --no-viz --dataset <seq>`.
