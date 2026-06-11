@@ -33,11 +33,11 @@ perspective pipeline on every scene.
 - ☑ **T-B3** WebXR viewer `?source=pano` + PANO button (validated over HTTPS).
 
 ## Priority 3 — Training speed
-- ◑ **T-C1** gsplat backend — **micro-benchmark done, strongly positive**:
+- ☑ **T-C1** gsplat backend — **micro-benchmark done, strongly positive**:
   fwd+bwd on identical 100k gaussians @1024² → gsplat **243 iter/s vs INRIA
   71 iter/s = 3.42× faster** (beats the expected 1.5–2×). `p3_pano/bench_raster.py`.
-  Full backend swap (densification parity + quality) not wired yet — the speed
-  case is proven; integration is the remaining (optional) work.
+  Full backend swap now DONE in **T-F2**: end-to-end gsplat training is 1.55×
+  faster AND +1.78 dB vs INRIA on scene_023 (matched holdout/iters).
 
 ## Backlog — correctness / ops
 - ☐ **T-D1** Investigate GPU `exhaustive_matcher` 85-min slowness (real bug).
@@ -91,9 +91,19 @@ Ranked by value. T-F1 is the only one that can change a *conclusion*.
   tracking until frame ~116 with only 1 skipped frame** vs relocalize-thrash
   from frame 16. The loss-at-frame-16 was a sampling artifact, not a capability
   limit. Trajectory: `p4_slam/slam_output_seq023_dense/trajectory_tum.txt`.
-- ☐ **T-F2** Wire gsplat backend into the training loop (finishes T-C1). Micro-
-  bench proved 3.42×; remaining is densification parity + held-out quality
-  check so the speedup is real end-to-end, not just a kernel benchmark.
+- ☑ **T-F2** gsplat backend wired end-to-end (finishes T-C1) — **faster AND
+  higher quality**. `p3_pano/train_gsplat.py` (gsplat 1.5.3 + native
+  DefaultStrategy densification) vs INRIA `train.py`, SAME scene_023 / same
+  every-8th holdout / same 7000 iters:
+  | backend | held-out PSNR | it/s | train wall |
+  |---|---|---|---|
+  | INRIA | 17.11 | 17.2 | 408 s |
+  | **gsplat** | **18.89** (SSIM 0.666) | **26.5** | **264 s** |
+  → **1.55× faster end-to-end, +1.78 dB** — and conservative, since the gsplat
+  trainer re-reads images from disk each iter while INRIA caches them. The
+  end-to-end 1.55× (vs the 3.42× pure-kernel micro-bench) is what remains once
+  I/O + SSIM + densification are included. Runner: `run_gsplat_train.sh`
+  (persistent TORCH_EXTENSIONS_DIR JIT cache; auto-vendors glm headers).
 - ☐ **T-F3** Global BA for sliding-window VGGT (finishes T-D4). Current Umeyama-
   only merge drifts in scale (s 1.23→0.026); add a lightweight global bundle
   adjust so >100-panorama flights reconstruct cleanly.
