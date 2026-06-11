@@ -12,19 +12,24 @@ coarse model on landing. Evaluated [MASt3R-SLAM](https://github.com/rmurai0610/M
 - ✅ Checkpoints downloadable via curl (sandbox off) from naverlabs — 2.9 GB
   fetched: metric `.pth` (2.6G) + retrieval `.pth` (8M) + codebook `.pkl` (257M).
 
-## Blockers / risks
-1. **Build chain vs torch version.** Repo pins **torch 2.5.1**; our container is
-   **torch 2.6 (nv24.12) / CUDA 12.6**. The build needs:
-   - `lietorch` (git, princeton-vl) — a CUDA extension notoriously sensitive to
-     the torch version. A time-boxed build attempt against torch 2.6 did **not**
-     produce a success marker (inconclusive / classic version-mismatch trouble).
-   - `thirdparty/mast3r` (+ `asmk` C++ build, `dust3r`)
-   - the SLAM package's own CUDA ext (`gn_kernels.cu`, `matching_kernels.cu`,
-     DROID-SLAM-derived).
-   Getting all of these to compile together against torch 2.6 is a multi-hour,
-   high-risk effort. The reliable path is the repo's intended env: a dedicated
-   **conda env with torch==2.5.1 + matching pytorch-cuda**, or their Docker.
-2. **Domain mismatch — monocular *perspective* SLAM vs our 360° data.**
+## Build (CORRECTED 2026-06-11)
+Earlier I reported the build as "inconclusive / likely torch-version trouble".
+That was **wrong**. The first attempt failed only because pip **build isolation**
+pulled a fresh `torch` compiled with **CUDA 13.0** into the build env, which
+mismatched the system CUDA 12.6 — *not* a torch-2.5.1-vs-2.6 problem.
+
+- ✅ **`lietorch` builds fine** against the container's torch 2.6 / CUDA 12.6
+  when installed with **`--no-build-isolation`** (which the repo README
+  specifies): wheel `lietorch-0.3` built, `import lietorch` OK.
+- Remaining build pieces (`thirdparty/mast3r` + `roma`, the SLAM package's
+  `gn_kernels.cu`/`matching_kernels.cu` CUDA ext) are being built the same way;
+  status tracked in `data/8kpano/slam_fullbuild.log`.
+
+So the build is **viable in our torch-2.6 container** with `--no-build-isolation`
+— no separate torch-2.5.1 env required after all.
+
+## Remaining real consideration (not a build blocker)
+- **Domain mismatch — monocular *perspective* SLAM vs our 360° data.**
    MASt3R-SLAM expects a normal pinhole video. Our capture is equirectangular.
    Feeding equirect/fisheye directly won't work; we'd feed a **forward-crop
    sequence** (e.g. `pano_XXXX_y+000_p+00`). At our sparse pano sampling
@@ -33,15 +38,17 @@ coarse model on landing. Evaluated [MASt3R-SLAM](https://github.com/rmurai0610/M
    needed.
 
 ## Recommendation
-- **Not worth forcing into the torch-2.6 container.** If pursued, do it in a
-  **separate torch-2.5.1 conda env** (or the official MASt3R-SLAM Docker),
-  isolated from this repo's build.
-- For our actual need, **VGGT already covers feed-forward SfM** (10–100× faster
-  than COLMAP, validated on all 7 scenes). True *streaming* (while-flying)
-  reconstruction is a distinct capability that would require:
-  (a) a torch-2.5.1 MASt3R-SLAM env, and
-  (b) a dense forward-facing perspective stream from the drone (not 360° pano).
-- Assets are cached under `p4_slam/MASt3R-SLAM/checkpoints/` (git-ignored) so a
-  future torch-2.5.1 attempt can skip the 2.9 GB re-download.
+- **Build is viable here** (torch-2.6 container, `--no-build-isolation`) — no
+  separate torch-2.5.1 env needed. lietorch confirmed; mast3r + SLAM CUDA ext
+  build status in `data/8kpano/slam_fullbuild.log`.
+- The one genuine gap is **input**: MASt3R-SLAM is monocular *perspective* SLAM,
+  so a streaming demo needs a **dense forward-facing perspective stream** from
+  the drone (or a perspective re-render from the equirect video at high fps),
+  not the 360° panoramas.
+- For our current SfM need, **VGGT already covers it** (10–100× faster than
+  COLMAP, validated on all 7 scenes). MASt3R-SLAM adds *streaming / while-flying*
+  reconstruction, which is the next step if that capability is wanted.
+- Assets cached under `p4_slam/MASt3R-SLAM/checkpoints/` (git-ignored, 2.9 GB).
 
-## Status: assessed, not run to completion (research-scale, deferred).
+## Status: build de-risked (lietorch builds in-container); full build + a
+perspective-stream run is the remaining work to demonstrate streaming.
