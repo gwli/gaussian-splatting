@@ -119,8 +119,17 @@ Ranked by value. T-F1 is the only one that can change a *conclusion*.
   synthetic closed-loop trajectory, per-window random Sim3 + noise): global
   **0.556 vs sequential 0.793 mean error → 1.4× lower drift**. Key finding: the
   win comes from **loop closures**; for a pure chain (no revisits) the global
-  solve reduces to the sequential init (no worse). A full 1260-crop VGGT re-run
-  is the optional end-use (the >100-panorama case from T-D4).
+  solve reduces to the sequential init (no worse).
+  **Real-data run (scene_023, 1260 crops, `run_vggt_window.sh`):** 7 windows →
+  1260 cams + 34M pts; the pose graph found **6 edges / 0 loop-closures** (these
+  sequentially-ordered crops are a pure chain). Head-to-head over 300
+  multi-window cams: sequential 0.1157 vs global 0.1156 shared-frame
+  disagreement (**1.00× — identical**), scale range 0.026–1.23 for both. Exactly
+  as predicted: no loops → global == sequential. The scale spread is inherent
+  VGGT per-window metric ambiguity, unresolvable on a chain without a loop
+  closure or metric anchor. Net: global solve **validated correct + never-worse
+  on real data**; its drift-reduction benefit needs loop-closure capture (drone
+  revisiting places, matched by visual place-recognition rather than filename).
 - ☑ **T-F4** Network blocker for VGGT `--use_ba` REMOVED + validated end-to-end.
   Root cause was `api.github.com` rate-limiting `torch.hub.load`'s branch lookup
   (HTTP 403), hit by `dinov2` loading. Fix (`p2_vggt/vggsfm_localcache.patch` +

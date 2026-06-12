@@ -79,18 +79,14 @@ for wi, st in enumerate(starts):
     raw.append(dict(names=names, extr=extr, conf=conf, pts=pts, centers=Cs))
     print(f"  window {wi}: {S} frames")
 
-# ---- Pass 2: GLOBAL Sim3 pose-graph alignment (T-F3). Spanning-tree init from
-# adjacent windows + loop-closure refinement over ALL window pairs. Falls back to
-# the legacy sequential Umeyama if the solver is unavailable. ----
-xforms = None
-try:
-    from global_sim3 import optimize_global_sim3
-    xforms = optimize_global_sim3(
-        [{"names": r["names"], "centers": r["centers"]} for r in raw],
-        iters=3000, lr=0.02, verbose=True)
-except Exception as e:
-    print(f"  [global_sim3 unavailable: {e}] -> sequential Umeyama fallback")
-    xforms, name_to_C = [], {}
+# save raw per-window data so alignment can be re-analyzed offline (no VGGT re-run)
+np.savez(os.path.join(scene, "vggt_window_raw.npz"),
+         names=np.array([np.array(r["names"]) for r in raw], dtype=object),
+         centers=np.array([r["centers"] for r in raw], dtype=object), allow_pickle=True)
+
+
+def seq_align(raw):                              # legacy sequential pairwise Umeyama
+    xf, name_to_C = [], {}
     for wi, r in enumerate(raw):
         names, Cs = r["names"], r["centers"]
         if wi == 0:
@@ -98,13 +94,45 @@ except Exception as e:
         else:
             sh = [(i, n) for i, n in enumerate(names) if n in name_to_C]
             if len(sh) < 3:
-                s, R, t = xforms[-1]
+                s, R, t = xf[-1]
             else:
                 src = np.array([Cs[i] for i, _ in sh]); dst = np.array([name_to_C[n] for _, n in sh])
                 s, R, t = umeyama(src, dst)
         for i, n in enumerate(names):
             name_to_C[n] = s * (R @ Cs[i]) + t
-        xforms.append((s, R, t))
+        xf.append((s, R, t))
+    return xf
+
+
+def shared_resid(raw, xf):
+    """Real-data metric: mean disagreement (no GT) of cameras seen in >1 window."""
+    pos = {}
+    for r, (s, R, t) in zip(raw, xf):
+        for i, n in enumerate(r["names"]):
+            pos.setdefault(n, []).append(s * (R @ r["centers"][i]) + t)
+    errs = [np.linalg.norm(np.array(v) - np.array(v).mean(0), axis=1).mean()
+            for v in pos.values() if len(v) > 1]
+    return (float(np.mean(errs)) if errs else 0.0), len(errs)
+
+
+# ---- Pass 2: GLOBAL Sim3 pose-graph alignment (T-F3) + head-to-head vs sequential ----
+xf_seq = seq_align(raw)
+xforms = xf_seq
+try:
+    from global_sim3 import optimize_global_sim3
+    xf_glob = optimize_global_sim3(
+        [{"names": r["names"], "centers": r["centers"]} for r in raw],
+        iters=3000, lr=0.02, verbose=True)
+    sr_s, nshared = shared_resid(raw, xf_seq)
+    sr_g, _ = shared_resid(raw, xf_glob)
+    srng = lambda xf: (min(s for s, _, _ in xf), max(s for s, _, _ in xf))
+    print(f"\n[T-F3] real-data comparison over {nshared} multi-window cameras:")
+    print(f"  sequential : shared-frame disagreement {sr_s:.4f}  scale range {srng(xf_seq)}")
+    print(f"  global     : shared-frame disagreement {sr_g:.4f}  scale range {srng(xf_glob)}")
+    print(f"  => global {sr_s/sr_g:.2f}x lower disagreement" if sr_g > 0 else "")
+    xforms = xf_glob
+except Exception as e:
+    print(f"  [global_sim3 unavailable: {e}] -> sequential Umeyama")
 
 # ---- Pass 3: apply per-window Sim3, dedup cameras, accumulate conf-masked pts ----
 g_names, g_R, g_t, g_pts = [], [], [], []
