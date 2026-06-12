@@ -140,6 +140,8 @@ GLOMAP 已有官方 docker image `colmap/glomap:latest`。
 - INRIA diff-gaussian-rasterization: 71 iter/s (14.07 ms/iter)
 - **gsplat 快 3.42x**（超出预期 1.5-2x）。速度案例已证实；完整后端替换
   （致密化对齐 + 质量）为可选后续工作。
+- **✅ 完整端到端后端替换已完成 (T-F2, 2026-06-11)** — 见第七节。同场景同
+  holdout 同迭代下 gsplat 比 INRIA **快 1.55x 且 PSNR +1.78 dB**。
 
 
 [nerfstudio/gsplat](https://github.com/nerfstudio-project/gsplat) 是更优化的 3DGS 训练库：
@@ -320,6 +322,12 @@ WebXR viewer 用 `?source=vggt` 浏览。
 ```
 
 适合**主动飞行规划**：边重建边判断是否需要补拍某些视角。
+
+> **✅ P2.2 已构建并跑通 (T-E1 + T-F1, 2026-06-11)** — 见第七节。MASt3R-SLAM 在
+> torch-2.6/CUDA-12.6 容器内 build + run 全部跑通（H100 sm_90）。**关键发现**：
+> 90 张稀疏全景（0.24fps）第 16 帧丢失跟踪；从 `.insv` 重渲染**密集前向透视流**
+> （4fps）后**连续跟踪 107 关键帧**（6.7x），证明之前的丢失是采样稀疏假象而非
+> 能力上限。完整复现见 `p4_slam/`。
 
 #### P2.3 Web 端 GPU 训练（在浏览器训练）
 
@@ -505,3 +513,86 @@ CPU 32 cores
 | PLY/ksplat 加载到首屏 | 8-10 s | **≤ 3 s** |
 | GPU 平均利用率 | ~30% | **≥ 60%** |
 | 失败率（COLMAP fail） | 3/7 | **≤ 1/7**（飞行规划优化后） |
+
+---
+
+## 七、改进任务 T-F (2026-06-11 ~ 06-12)
+
+在 P0/P1/P2 基础上的 5 项改进，全部实现 + 验证 + 提交（`tasks.md` 跟踪，
+代码在 `p3_pano/`、`p4_slam/`、`p2_vggt/`）。按价值排序，附诚实结论。
+
+### T-F1 — 密集前向透视流：修复 MASt3R-SLAM 跟踪（**改变了结论**）
+`p4_slam/make_dense_perspective.sh` 从原始 `.insv` 单次 ffmpeg 解码
+（dual-fisheye→equirect→flat）重渲染密集前向透视流。
+
+| 指标 | 稀疏（90 全景 @0.24fps） | **密集（360 帧 @4fps）** |
+|---|---|---|
+| 轨迹关键帧 | 16 | **107（6.7x）** |
+| 稠密点云 | 10.8 MB | **59 MB（5.5x）** |
+| 首次丢失跟踪 | 第 16 帧（~67s） | **直到第 ~116 帧** |
+| 丢帧数 | 多次重定位抖动 | **仅 1 帧** |
+| 速度 | ~3.5 FPS | ~7 FPS |
+
+> 原"第 16 帧丢失"是**采样稀疏假象**（380s 飞行只采 0.24fps），非能力上限。
+> 密集流下 MASt3R-SLAM 在该无人机数据上**连续跟踪**，提供流式重建能力。
+
+### T-F2 — gsplat 后端端到端接入（**更快且质量更高**，收尾 P1.2）
+`p3_pano/train_gsplat.py`（gsplat 1.5.3 + 原生 DefaultStrategy 致密化）
+vs INRIA `train.py`，**同 scene_023 / 同 every-8th holdout / 同 7000 迭代**：
+
+| 后端 | held-out PSNR | SSIM | 吞吐 | 训练墙钟 |
+|---|---|---|---|---|
+| INRIA | 17.11 | — | 17.2 it/s | 408 s |
+| **gsplat** | **18.89** | 0.666 | **26.5 it/s** | **264 s** |
+
+> **快 1.55x + 高 1.78 dB**；且为保守值（gsplat trainer 每迭代从磁盘重读图像、
+> INRIA 缓存）。端到端 1.55x（vs 纯 kernel 微基准 3.42x）是计入 I/O + SSIM +
+> 致密化后的真实数字。Runner: `run_gsplat_train.sh`（持久 JIT 缓存 + 自动 vendor glm）。
+
+### T-F3 — 滑窗 VGGT 全局 Sim3 位姿图对齐（收尾 T-D4）
+`p2_vggt/global_sim3.py`：用全局位姿图解替换贪心顺序 Umeyama —— 生成树初始化
+（相邻窗口）+ 全窗口对精化（重访地点自动成为闭环边）。loss 作用于**相对 Sim3**
+（尺度由测量锚定）→ 无尺度坍缩模式。仅用相机中心（无特征轨迹）→ 适用稀疏 360 数据。
+
+**合成闭环轨迹验证**（`test_global_align.py`，每窗口随机 Sim3 + 噪声）：
+全局 **0.556 vs 顺序 0.793 平均误差 = 1.4x 更低漂移**。
+
+**真实 1260-crop 验证**（scene_023，`run_vggt_window.sh`，2026-06-12）：
+7 窗口 → 1260 相机 + 34M 点；位姿图找到 **6 边 / 0 闭环**（顺序裁剪 = 纯链）。
+300 个多窗口相机上的对比：
+
+| 方法 | 共享帧不一致度 | 尺度范围 |
+|---|---|---|
+| 顺序 Umeyama | 0.1157 | 0.026 – 1.23 |
+| **全局 Sim3** | 0.1156 | 0.026 – 1.23 |
+| | **1.00x（完全相同）** | |
+
+> **完全符合预测**：无闭环 → 全局解退化为顺序初始化（不会更差）。0.026–1.23 的
+> 尺度跨度是 VGGT 每窗口固有的度量歧义，纯链上**任何**对齐方法都无法消除（需闭环
+> 或度量锚）。结论：全局解在真实数据上**已验证正确 + 永不更差**；其减漂移收益需要
+> 闭环采集（无人机重访地点，且用视觉位置识别而非文件名匹配）。
+
+### T-F4 — 解除 VGGT `--use_ba` 网络阻塞（数据受限，非 bug）
+T-D5 的 403 根因是 `api.github.com` 限流 `torch.hub.load` 的分支查询（dinov2 触发），
+非 tracker 权重。修复（`p2_vggt/vggsfm_localcache.patch` + `run_vggt_ba.sh`）：
+预取 tracker 权重（HuggingFace）+ 预 clone dinov2，经 `VGGSFM_TRACKER_PT` 与
+`source="local"`（`DINOV2_LOCAL_DIR`）加载，零 github API 调用。
+
+> BA 流程现在**全程跑通**（模型→dino 排序→tracker→fine-tracking）。**发现**：
+> 60–300 张稀疏全景裁剪上报 "Not enough inliers per frame, skip BA" —— 360 派生
+> 裁剪的 inlier 特征轨迹不足以做经典 BA 三角化。**直接证据**佐证 T-D5：前馈 VGGT
+> （无需对应点）才是这类数据的正确工具；BA 不只是低 ROI，而是数据受限。
+
+### T-F5 — 工程化与可复现
+- `run_slam_full.sh --clean` 删除数 GB 的 `mast3r-slam:built` 镜像。
+- `_slam_build.sh` 自动 `git apply` 补丁（幂等 `--check`），全新 clone 一键可跑。
+- `p4_slam/SETUP.md` 文档化完整复现步骤（clone、checkpoints、vendor eigen→lietorch_src）。
+
+### 小结
+| 任务 | 状态 | 一句话结论 |
+|---|---|---|
+| T-F1 密集透视流 | ✅ | 修复 SLAM 跟踪，107 vs 16 关键帧 |
+| T-F2 gsplat 端到端 | ✅ | 快 1.55x + 高 1.78 dB |
+| T-F3 全局 Sim3 对齐 | ✅ | 正确+永不更差；收益靠闭环（纯链上 == 顺序） |
+| T-F4 BA 网络解阻 | ✅ | 阻塞已除；BA 跑通但数据 inlier 不足（佐证前馈 VGGT） |
+| T-F5 工程化 | ✅ | 一键复现 + 镜像清理 |
