@@ -29,6 +29,7 @@
   │  ffmpeg v360 (dual-fisheye → equirect, GPU 解码)
   ▼
 equirect 全景帧 (4096×2048)
+  │  ★ FPS 选帧 (T-G, batch_pano.sh 默认): 位姿最远点采样, ~+1 dB vs 均匀, 零额外帧
   │  pano_to_perspective.py (多进程, 14 视角/帧)
   ▼
 透视裁剪 (≤300, VGGT 显存上限)
@@ -129,5 +130,6 @@ WebXR 查看器支持 PICO 4 Ultra，`?source=colmap|vggt|pano` 切换，自签 
 1. **SfM 用 VGGT**（前馈，秒级，挽救 COLMAP 失败场景）。
 2. **全景重建用直接全景 + 融合 equirect-gsplat 内核**（T-F8，又快又好，少图、高质、原生 equirect；比 LONLAT 快 1.28×）。LONLAT 作为对照/后备（`BACKEND=lonlat`）。
 3. **针孔/透视训练用 gsplat**（快 1.55×）。
-4. **流式重建用 MASt3R-SLAM**，但要喂**密集前向透视流**（不是稀疏全景）。
-5. 大规模航线的窗口合并用 `global_sim3.py`，**前提是有闭环**。
+4. **选帧用位姿 FPS**（最远点采样，`batch_pano.sh` 默认；~+1 dB vs 均匀，零额外帧）。**别加误差引导**（实测无益甚至有害）。
+5. **流式重建用 MASt3R-SLAM**，但要喂**密集前向透视流**（不是稀疏全景）。
+6. 大规模航线的窗口合并用 `global_sim3.py`，**前提是有闭环**。

@@ -22,11 +22,14 @@ for S in scene_021 scene_022 scene_023 scene_025 scene_026 scene_027 scene_028; 
   D=$ROOT/data/8kpano/scenes/${S}_pano
   echo "########## $(date) :: $S ##########"
 
-  # 1) prep (stitch+crop+curate+VGGT) — skip if sparse already exists
+  # 1) prep (stitch+crop+curate+VGGT) — skip if sparse already exists.
+  # Default frame selection = fps (T-G: ~+1 dB vs uniform, no extra frames).
+  # SELECT_FRAMES=uniform reverts. To re-prep an existing scene with FPS, delete
+  # its sparse/0 first.
   if [ -f "$D/sparse/0/cameras.bin" ]; then
     echo "[$S] prep already done, skipping stitch/VGGT"
   else
-    bash $PP/prep_pano.sh $S ${INSV[$S]} 90 > $LOG/${S}_pano_prep.log 2>&1 \
+    bash $PP/prep_pano.sh $S ${INSV[$S]} 90 "${SELECT_FRAMES:-fps}" > $LOG/${S}_pano_prep.log 2>&1 \
       || { echo "[$S] PREP FAILED"; continue; }
   fi
 
