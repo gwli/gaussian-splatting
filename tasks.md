@@ -204,6 +204,9 @@ Ranked by value. T-F1 is the only one that can change a *conclusion*.
   雅可比正确。**速度**:比 LONLAT **快 1.27×**(69.5s vs 88s),质量并列最好。
   **结论翻转**:之前"全景用 LONLAT"的结论被推翻——**融合 equirect-gsplat 现在是直接
   全景训练的最佳后端**(又快又好)。当年说"需要多周 CUDA 工程"——这次把它做出来了。
+  **7 场景验证**(`batch_pano_gsplat_fused.sh`,held-out vs T-A4 LONLAT):平均 PSNR
+  **20.54 vs 20.43**(并列/微胜),稳定 **~101 it/s vs ~79**(≈1.28× 快),7/7 无失败。
+  逐场景 021/022/023/025/026/027/028 = 21.49/22.92/18.99/19.61/20.12/19.58/21.08。
 
 ## Done
 - ☑ P0.2 joblib Stage-2 · P0.3 15k-iter · P0.4 chunked-stitch (script) ·
