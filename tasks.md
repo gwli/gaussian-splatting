@@ -166,6 +166,24 @@ Ranked by value. T-F1 is the only one that can change a *conclusion*.
   purpose-built LONLAT equirect rasterizer remains the right backend for
   direct-pano; gsplat's win is specific to pinhole/perspective training. Runner:
   `run_pano_gsplat_train.sh`.
+- ☑ **T-F7** "球面版 gsplat 内核" — **可行且质量持平,但更慢;瓶颈在投影,非合成**.
+  `p3_pano/gsplat_equirect.py`:把 equirect **投影**(含解析雅可比算 2D 协方差)放在
+  autograd-PyTorch 里,再喂给 gsplat 的快速 CUDA tile 合成器 `rasterize_to_pixels`
+  (一趟 equirect,不用立方体),致密化复用 gsplat `DefaultStrategy`。约定与
+  `auxiliary.h` 完全一致。scene_023 四方对比(同 holdout/迭代):
+  | 后端 | PSNR | LPIPS | it/s | 墙钟 |
+  |---|---|---|---|---|
+  | **LONLAT**(原生 equirect,全融合 CUDA) | 18.6–19.6 | 0.480 | **79.2** | **88s** |
+  | gsplat 立方体 (T-F6) | 19.62 | 0.466 | 72.2 | 97s |
+  | gsplat equirect, eager | 18.88 | 0.469 | 42.4 | 165s |
+  | gsplat equirect, torch.compile | 18.56 | 0.470 | 19.4 | 361s |
+  **结论**:质量持平(PSNR/LPIPS 可比),但**最慢**。合成器(gsplat 内核)不是瓶颈
+  ——**eager-PyTorch 投影**(批量 3×3 矩阵 + 雅可比,~10万高斯)才是,比 LONLAT 的
+  全融合 CUDA 慢 2×。`torch.compile` 反而更糟:致密化每 100 步改变 N → 反复重编译
+  (日志可见 recompile)→ 6.5 it/s。**要真正超过 LONLAT,必须把投影也做成融合 CUDA
+  内核**(改 gsplat 的 `fully_fused_projection` 前向+反向,equirect 反向雅可比是难点)
+  ——多周级 CUDA 工程。本次混合方案证明:思路正确(质量持平、约定正确)、瓶颈定位清楚
+  (投影需融合),但 Python 投影赢不了。**全景仍用 LONLAT。** Runner: `... <cams> <out> <iters> <W> <face> sph`。
 
 ## Done
 - ☑ P0.2 joblib Stage-2 · P0.3 15k-iter · P0.4 chunked-stitch (script) ·

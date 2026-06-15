@@ -605,6 +605,24 @@ lat=asin(y)）；gsplat 原生 DefaultStrategy 致密化。scene_023 同 holdout
 > **直接全景训练应继续用专用 LONLAT equirect 光栅化器；gsplat 的优势仅限针孔/透视。**
 > Runner: `run_pano_gsplat_train.sh`。
 
+### T-F7 — 球面版 gsplat 内核(投影+gsplat 合成器):可行,但瓶颈在投影
+为彻底回答"能否写个球面 gsplat 内核打败 LONLAT",做了 equirect **投影(autograd-
+PyTorch,含解析雅可比)+ gsplat 快速 CUDA 合成器 `rasterize_to_pixels`** 的混合方案
+(`p3_pano/gsplat_equirect.py`,一趟 equirect,不用立方体)。scene_023 四方对比:
+
+| 后端 | PSNR | LPIPS | it/s | 墙钟 |
+|---|---|---|---|---|
+| **LONLAT**(原生,全融合 CUDA) | 18.6–19.6 | 0.480 | **79.2** | **88s** |
+| gsplat 立方体 (T-F6) | 19.62 | 0.466 | 72.2 | 97s |
+| gsplat equirect, eager | 18.88 | 0.469 | 42.4 | 165s |
+| gsplat equirect, torch.compile | 18.56 | 0.470 | 19.4 | 361s |
+
+> **结论**:质量持平,但**最慢**。证明了 gsplat 的**合成器不是瓶颈,投影才是**——
+> eager-PyTorch 投影比 LONLAT 的全融合 CUDA 慢 2×;`torch.compile` 因致密化反复改变
+> N 而不断重编译,更慢。**真正超过 LONLAT 需把投影也写成融合 CUDA 内核**(改 gsplat
+> `fully_fused_projection` 前向+反向,equirect 反向雅可比是难点,多周级工程)。
+> 当前结论不变:**全景训练用 LONLAT。**
+
 ### 小结
 | 任务 | 状态 | 一句话结论 |
 |---|---|---|
@@ -614,3 +632,4 @@ lat=asin(y)）；gsplat 原生 DefaultStrategy 致密化。scene_023 同 holdout
 | T-F4 BA 网络解阻 | ✅ | 阻塞已除；BA 跑通但数据 inlier 不足（佐证前馈 VGGT） |
 | T-F5 工程化 | ✅ | 一键复现 + 镜像清理 |
 | T-F6 gsplat 接全景训练 | ✅ | 质量持平但慢 ~10%（立方体 3x 像素）→ 全景仍用 LONLAT |
+| T-F7 球面版 gsplat 内核 | ✅ | 质量持平但最慢；瓶颈在投影(需融合 CUDA)→ 全景仍用 LONLAT |
