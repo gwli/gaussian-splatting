@@ -91,6 +91,7 @@ def render(cam):
 DENSIFY_UNTIL = int(ITERS * 0.5); DENSIFY_FROM = 500; DENSIFY_INT = 100
 OPACITY_RESET = 3000
 stack = []
+import time as _time; _t0 = _time.time()
 for it in range(1, ITERS + 1):
     gaussians.update_learning_rate(it)
     if it % 1000 == 0: gaussians.oneupSHdegree()
@@ -115,6 +116,9 @@ for it in range(1, ITERS + 1):
         gaussians.optimizer.zero_grad(set_to_none=True)
     if it % 500 == 0:
         print(f"  iter {it}: loss {loss.item():.4f}  N={gaussians.get_xyz.shape[0]}", flush=True)
+
+torch.cuda.synchronize(); _dt = _time.time() - _t0
+print(f"[TIME] LONLAT trained {ITERS} it in {_dt:.1f}s = {ITERS/_dt:.1f} it/s", flush=True)
 
 # --- save ply + eval ---
 pc_dir = os.path.join(out_dir, f"point_cloud/iteration_{ITERS}")

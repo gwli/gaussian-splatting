@@ -148,6 +148,24 @@ Ranked by value. T-F1 is the only one that can change a *conclusion*.
   `mast3r_slam_patches.diff` (idempotent `git apply --check`) so a fresh clone is
   one-command runnable; (c) `p4_slam/SETUP.md` documents the full reproducible
   setup (clone, checkpoints, vendor eigen→lietorch_src).
+- ☑ **T-F6** gsplat backend wired into **direct-pano** training (`train_pano.py`)
+  — **works at quality parity, but NOT faster** for panoramas. gsplat is
+  pinhole-only (no equirect), so `p3_pano/train_pano_gsplat.py` renders 6 pinhole
+  **cube faces** per pano (one batched gsplat `C=6` call) + resamples to equirect
+  with a differentiable `grid_sample`, using the EXACT LONLAT convention
+  (`auxiliary.h`: lon=atan2(x,z), lat=asin(y)); gsplat `DefaultStrategy` drives
+  densification. scene_023, same holdout/iters, head-to-head:
+  | backend | PSNR | LPIPS | it/s | train wall | pixels/pano |
+  |---|---|---|---|---|---|
+  | LONLAT (native equirect, OmniGS) | 18.63–19.55 | 0.480 | **79.2** | **88 s** | 0.52M |
+  | gsplat cubemap | **19.62** | **0.466** | 72.2 | 97 s | 1.57M (6×512²) |
+  **Finding:** quality is on par (PSNR/LPIPS comparable; SSIM not — gsplat eval
+  uses box-window vs train_pano's Gaussian-window), but gsplat is **~10% slower**
+  here: the 6-face cubemap renders ~3× the pixels of one equirect pass, eating
+  the per-kernel speedup that won for pinhole (T-F2, 1.55×). **Conclusion:** the
+  purpose-built LONLAT equirect rasterizer remains the right backend for
+  direct-pano; gsplat's win is specific to pinhole/perspective training. Runner:
+  `run_pano_gsplat_train.sh`.
 
 ## Done
 - ☑ P0.2 joblib Stage-2 · P0.3 15k-iter · P0.4 chunked-stitch (script) ·
