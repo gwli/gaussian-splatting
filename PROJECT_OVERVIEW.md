@@ -71,7 +71,9 @@ WebXR 查看器 (PICO 4 Ultra / VR, HTTPS)
   - **融合 equirect-gsplat 内核（T-F8,最终方案）**：给 gsplat 加 `EQUIRECT` 相机模型,
     手写 equirect 投影**前向+反向 CUDA**(+ 球面裁剪/径向深度)。7 场景验证:平均 PSNR
     **20.54 vs LONLAT 20.43**,稳定 **~101 it/s vs ~79（快 1.28×）**。
-- 结论：**针孔用 gsplat；全景用融合 equirect-gsplat（T-F8，已超过 LONLAT）**。
+  - **完整流水线端到端确认**（`batch_pano.sh` 默认 T-F8,pose→训练→PLY→KSPLAT,7/7 成功）:
+    平均 PSNR **20.41**,~101 it/s / ~69s,每场景生成可供 WebXR/PICO 加载的 `.ksplat`（716K–2.4M）。
+- 结论：**针孔用 gsplat；全景用融合 equirect-gsplat（T-F8，已超过 LONLAT，且默认接入流水线）**。
 
 ### 流式重建 MASt3R-SLAM（T-E1 / T-F1）
 - 在 torch-2.6/CUDA-12.6 容器（H100 sm_90）**build + run 全部跑通**。
