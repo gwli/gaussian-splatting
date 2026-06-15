@@ -224,6 +224,22 @@ Ranked by value. T-F1 is the only one that can change a *conclusion*.
   **视角覆盖(FPS)> 误差追逐(adaptive)**——误差贪心会把预算过度集中在本质上就难的
   区域(运动模糊/天空/遮挡),牺牲整体覆盖。④ 改进方向:FPS 种子 + 误差驱动(覆盖×
   误差加权),可能两者兼得。**结论:把现管线的均匀采样换成 FPS,白赚 ~1 dB。**
+- ☑ **T-G2** FPS 接入 `prep_pano.sh` + FPS×误差混合实验。
+  **(a) 生产集成**:`prep_pano.sh <S> <insv> <N> fps [POOLX]` 新增 FPS 模式——
+  stitch POOLX×N 池 → 1-crop 粗 VGGT → `fps_select.py` 位姿最远点选 N → 裁剪/重训。
+  `fps_select.py` 已验证(270 池 → 90 唯一、空间分散的 panos)。
+  **(b) FPS×误差混合**(`select_compare.py` 新增 `hybrid`:FPS 种子保覆盖 + 余量按
+  误差×新颖度(到已选最小距)贪心)。4-way(同 12 测试/78 预算,fused T-F8):
+  | 策略 | PSNR | SSIM |
+  |---|---|---|
+  | uniform | 18.94 | 0.612 |
+  | **fps** | **19.55** | **0.631** |
+  | adaptive(纯误差贪心) | 18.16 | 0.613 |
+  | hybrid(FPS+误差×新颖) | 19.17 | 0.621 |
+  **诚实结论**:**纯 FPS 仍最优**;hybrid 比 uniform/adaptive 好但**赢不了纯 FPS**;
+  adaptive **不稳定**(上轮 18.86→本轮 18.16,跌破 uniform)。即**加误差引导没用、甚至
+  有害**——本数据的高误差区是本质上难的(模糊/天空/遮挡),不是欠采样,加视角救不回来。
+  **最终建议不变:用纯 FPS(位姿最远点),别加误差项。**
 
 ## Done
 - ☑ P0.2 joblib Stage-2 · P0.3 15k-iter · P0.4 chunked-stitch (script) ·

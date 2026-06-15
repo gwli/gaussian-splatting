@@ -302,7 +302,7 @@ def main():
     if args.directions:
         directions = []
         for pair in args.directions.split():
-            yaw, pitch = map(float, pair.split(","))
+            yaw, pitch = map(int, pair.split(","))  # int degrees (filename uses %d)
             directions.append((yaw, pitch))
     else:
         directions = PRESETS[args.preset]

@@ -127,6 +127,29 @@ def sel_fps():
         d = np.minimum(d, np.linalg.norm(pts - pts[j], axis=1))
     return sorted(np.array(cand)[chosen].tolist())
 
+def sel_hybrid():
+    # FPS seed (coverage) for half the budget, then add remaining by error x novelty
+    # (min-dist-to-selected) so error-driven adds don't over-concentrate. T-G2.
+    half = max(N_TRAIN // 2, 8)
+    pts = CEN[cand]; loc = [0]; d = np.linalg.norm(pts - pts[0], axis=1)
+    while len(loc) < half:
+        j = int(d.argmax()); loc.append(j); d = np.minimum(d, np.linalg.norm(pts - pts[j], axis=1))
+    sel = set(np.array(cand)[loc].tolist())
+    sp = train(sorted(sel), SEL_ITERS)
+    rest = [i for i in cand if i not in sel]
+    errs = cand_errors(sp, rest)
+    while len(sel) < N_TRAIN:
+        selarr = np.array([CEN[i] for i in sel])
+        best, bestscore = None, -1.0
+        for i in rest:
+            if i in sel: continue
+            nd = float(np.linalg.norm(selarr - CEN[i], axis=1).min())   # novelty
+            sc = errs[i] * nd                                            # error x novelty
+            if sc > bestscore: bestscore, best = sc, i
+        sel.add(best)
+    print(f"  [hybrid] FPS-seed {half} + error×novelty {N_TRAIN-half}")
+    return sorted(sel)
+
 def sel_adaptive():
     seed_n = max(N_TRAIN//3, 8)
     sel = set(np.array(cand)[np.linspace(0, len(cand)-1, seed_n).round().astype(int)].tolist())
@@ -140,15 +163,26 @@ def sel_adaptive():
         print(f"  [adaptive] |sel|={len(sel)} added {len(add)} (max err {max(errs.values()):.4f})")
     return sorted(sel)
 
+ALL = {"uniform": sel_uniform, "fps": sel_fps, "adaptive": sel_adaptive, "hybrid": sel_hybrid}
+want = os.environ.get("STRATS", "uniform,fps,adaptive,hybrid").split(",")
 results = {}
-for name, selector in [("uniform", sel_uniform), ("fps", sel_fps), ("adaptive", sel_adaptive)]:
+for name in want:
+    selector = ALL[name]
     t0 = time.time(); tr = selector()
     sp = train(tr, ITERS)
     p = eval_psnr(sp, test_idx); s = float(np.mean([ssim(render(sp,i,SH_MAX)[0][None], GT[i][None]).item() for i in test_idx]))
     results[name] = {"psnr": round(p,3), "ssim": round(s,4), "n_train": len(tr), "sel_s": round(time.time()-t0,1)}
     print(f"[RESULT] {name:9s} PSNR={p:.3f} SSIM={s:.4f}  (n_train={len(tr)}, {results[name]['sel_s']}s)")
 
-print("\n=== 3-WAY (same 12 test, same 78 budget, fused T-F8) ===")
-for k in ["uniform","fps","adaptive"]:
-    print(f"  {k:9s} PSNR {results[k]['psnr']:.3f}  SSIM {results[k]['ssim']:.4f}")
-json.dump({"test_idx": test_idx, "results": results}, open(os.path.join(os.path.dirname(pool_json), "select_compare_result.json"), "w"), indent=1)
+# merge with any prior results so a partial run (e.g. STRATS=hybrid) updates the table
+outp = os.path.join(os.path.dirname(pool_json), "select_compare_result.json")
+prev = {}
+if os.path.exists(outp):
+    try: prev = json.load(open(outp)).get("results", {})
+    except Exception: pass
+prev.update(results)
+print(f"\n=== SELECTION COMPARISON (same {N_TEST} test, same {N_TRAIN} budget, fused T-F8) ===")
+for k in ["uniform", "fps", "adaptive", "hybrid"]:
+    if k in prev:
+        print(f"  {k:9s} PSNR {prev[k]['psnr']:.3f}  SSIM {prev[k]['ssim']:.4f}")
+json.dump({"test_idx": test_idx, "results": prev}, open(outp, "w"), indent=1)
