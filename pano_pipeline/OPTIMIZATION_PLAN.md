@@ -623,6 +623,26 @@ PyTorch,含解析雅可比)+ gsplat 快速 CUDA 合成器 `rasterize_to_pixels`*
 > `fully_fused_projection` 前向+反向,equirect 反向雅可比是难点,多周级工程)。
 > 当前结论不变:**全景训练用 LONLAT。**
 
+### T-F8 — 融合版 equirect-gsplat CUDA 内核:成功,又快又好,超过 LONLAT
+按 T-F7 的定位(瓶颈在投影),把投影也做成融合 CUDA:给 gsplat 加
+`CameraModelType::EQUIRECT`,在 `ProjectionEWA3DGSFused.cu` 实现 equirect 投影的
+**前向 + 反向 VJP**(`Utils.cuh::equirect_proj`/`equirect_proj_vjp`,解析雅可比 +
+∂J/∂μ 二阶项),并处理球面特性:**不按 z 裁剪**(全 360° 可见)、深度用**径向距离**。
+全部改动在 `p3_pano/gsplat_equirect_kernel.patch`(runner 自动 `git apply`)。
+scene_023 终版四方对比:
+
+| 后端 | PSNR | LPIPS | it/s | 墙钟 |
+|---|---|---|---|---|
+| LONLAT(原生,INRIA 级) | 18.6–19.6 | 0.480 | 79.2 | 88s |
+| gsplat 立方体 (T-F6) | 19.62 | 0.466 | 72.2 | 97s |
+| gsplat equirect 混合 (T-F7) | 18.88 | 0.469 | 42.4 | 165s |
+| **gsplat equirect 融合 (T-F8)** | **19.57** | **0.465** | **100.7** | **69.5s** |
+
+> **正确性**:200 迭代 PSNR 12.565,与已验证的混合版(12.562)逐位吻合 → 手推反向雅可比正确。
+> **速度**:比 LONLAT **快 1.27×**(69.5s vs 88s),质量并列最好。
+> **结论翻转**:T-F6/T-F7 的"全景用 LONLAT"被推翻——**融合 equirect-gsplat 现在是直接全景
+> 训练的最佳后端**。当年说"需要多周 CUDA 工程",这次做出来了。
+
 ### 小结
 | 任务 | 状态 | 一句话结论 |
 |---|---|---|
@@ -631,5 +651,6 @@ PyTorch,含解析雅可比)+ gsplat 快速 CUDA 合成器 `rasterize_to_pixels`*
 | T-F3 全局 Sim3 对齐 | ✅ | 正确+永不更差；收益靠闭环（纯链上 == 顺序） |
 | T-F4 BA 网络解阻 | ✅ | 阻塞已除；BA 跑通但数据 inlier 不足（佐证前馈 VGGT） |
 | T-F5 工程化 | ✅ | 一键复现 + 镜像清理 |
-| T-F6 gsplat 接全景训练 | ✅ | 质量持平但慢 ~10%（立方体 3x 像素）→ 全景仍用 LONLAT |
-| T-F7 球面版 gsplat 内核 | ✅ | 质量持平但最慢；瓶颈在投影(需融合 CUDA)→ 全景仍用 LONLAT |
+| T-F6 gsplat 接全景训练 | ✅ | 立方体方案质量持平但慢 ~10%（3x 像素） |
+| T-F7 球面 gsplat（混合） | ✅ | 质量持平但最慢；定位瓶颈=投影需融合 CUDA |
+| **T-F8 融合 equirect-gsplat 内核** | ✅ | **又快又好,比 LONLAT 快 1.27× → 全景最佳后端** |

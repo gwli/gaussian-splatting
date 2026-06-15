@@ -12,12 +12,19 @@ GLM_DST="$ROOT/p3_pano/gsplat/gsplat/cuda/csrc/third_party/glm"
 if [ ! -f "$GLM_DST/glm/gtc/type_ptr.hpp" ]; then
   cp -r "$ROOT/submodules/diff-gaussian-rasterization/third_party/glm/glm" "$GLM_DST/" 2>/dev/null || true
 fi
+# Apply the fused equirect CUDA kernel patch (T-F8) if not already applied, so a
+# fresh gsplat clone gets the "equirect" camera_model. Idempotent.
+PATCH="$ROOT/p3_pano/gsplat_equirect_kernel.patch"
+if [ -f "$PATCH" ] && ! grep -q 'EQUIRECT' "$ROOT/p3_pano/gsplat/gsplat/cuda/include/Common.h" 2>/dev/null; then
+  echo ">> applying gsplat_equirect_kernel.patch"; ( cd "$ROOT/p3_pano/gsplat" && git apply "$PATCH" ) || true
+fi
 
 docker run --rm --gpus all --ipc=host --ulimit memlock=-1 --ulimit stack=67108864 --user 0:0 \
   -e TORCH_EXTENSIONS_DIR=/w/p3_pano/.torch_ext_cache \
   -e TORCH_CUDA_ARCH_LIST=9.0 \
   -e PYTHONPATH=/w/p3_pano/gsplat \
   -e GSPLAT_EQUIRECT_COMPILE="${GSPLAT_EQUIRECT_COMPILE:-0}" \
+  -e GSPLAT_EQUIRECT_FUSED="${GSPLAT_EQUIRECT_FUSED:-1}" \
   -v "$ROOT":/w -w /w $PT bash -c "
   pip install -q --no-deps ninja rich jaxtyping plyfile 2>&1 | tail -1
   if [ \"$SPH\" = \"sph\" ]; then

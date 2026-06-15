@@ -12,7 +12,10 @@ from PIL import Image
 REPO = "/w" if os.path.exists("/w/scene/colmap_loader.py") else "/raid/git/gaussian-splatting"
 sys.path.insert(0, REPO + "/p3_pano")
 from gsplat import DefaultStrategy
-from gsplat_equirect import render_equirect
+from gsplat_equirect import render_equirect, render_equirect_fused
+_FUSED = os.environ.get("GSPLAT_EQUIRECT_FUSED", "1") == "1"
+_render_fn = render_equirect_fused if _FUSED else render_equirect
+print(f"[pano-gsplat-sph] backend = {'FUSED CUDA (T-F8)' if _FUSED else 'hybrid PyTorch-proj (T-F7)'}")
 
 cams_json, out_dir = sys.argv[1], sys.argv[2]
 ITERS = int(sys.argv[3]) if len(sys.argv) > 3 else 7000
@@ -66,9 +69,9 @@ print(f"[pano-gsplat-sph] {len(cams)} cams -> {len(train)} train / {len(test)} t
 
 def render(cam, sh_deg):
     colors = torch.cat([splats["sh0"], splats["shN"]], 1)
-    img, info = render_equirect(splats["means"], splats["quats"], torch.exp(splats["scales"]),
-                                torch.sigmoid(splats["opacities"]), colors, cam["vm"], cam["C"],
-                                W, H, sh_deg)
+    img, info = _render_fn(splats["means"], splats["quats"], torch.exp(splats["scales"]),
+                           torch.sigmoid(splats["opacities"]), colors, cam["vm"], cam["C"],
+                           W, H, sh_deg)
     return img.permute(2, 0, 1).clamp(0, 1), info     # (3,H,W)
 
 def ssim(a, b):

@@ -22,7 +22,34 @@ Known v1 limitations (documented, not hidden):
 """
 import os, math, torch
 from gsplat.cuda._wrapper import (isect_tiles, isect_offset_encode,
-                                  rasterize_to_pixels, spherical_harmonics)
+                                  rasterize_to_pixels, spherical_harmonics,
+                                  fully_fused_projection)
+
+
+def render_equirect_fused(means, quats, scales, opacities, sh_coeffs, viewmat,
+                          cam_center, W, H, sh_degree, tile_size=16):
+    """T-F8: native FUSED equirect rasterizer. Uses gsplat's fully_fused_projection
+    with camera_model="equirect" (our new CUDA projection + analytic VJP), then
+    gsplat's fast tile compositor. All-CUDA fwd+bwd, one equirect pass."""
+    dev = means.device
+    vm = viewmat[None]                                  # (1,4,4) world->cam
+    K = torch.eye(3, device=dev)[None]                  # dummy; equirect ignores K
+    radii, means2d, depths, conics, _ = fully_fused_projection(
+        means, None, quats, scales, vm, K, W, H,
+        eps2d=0.3, near_plane=0.01, far_plane=1e10, packed=False,
+        camera_model="equirect")                        # (1,N,2)/(1,N,2)/(1,N)/(1,N,3)
+    dirs = torch.nn.functional.normalize(means - cam_center[None], dim=-1)
+    colors = (spherical_harmonics(sh_degree, dirs, sh_coeffs) + 0.5).clamp_min(0.0)[None]
+    op = opacities[None]
+    tw, th = math.ceil(W / tile_size), math.ceil(H / tile_size)
+    _, isect_ids, flatten_ids = isect_tiles(means2d, radii, depths, tile_size, tw, th,
+                                            packed=False, n_images=1,
+                                            conics=conics, opacities=op)
+    offs = isect_offset_encode(isect_ids, 1, tw, th)
+    img, _ = rasterize_to_pixels(means2d, conics, colors, op, W, H, tile_size, offs, flatten_ids)
+    info = {"means2d": means2d, "radii": radii, "width": W, "height": H,
+            "n_cameras": 1, "gaussian_ids": None}
+    return img[0], info
 
 
 def quat_to_rotmat(q):                       # (N,4) wxyz -> (N,3,3)

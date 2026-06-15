@@ -1,0 +1,251 @@
+diff --git a/gsplat/cuda/_wrapper.py b/gsplat/cuda/_wrapper.py
+index 0d1ed7d..fe0cd39 100644
+--- a/gsplat/cuda/_wrapper.py
++++ b/gsplat/cuda/_wrapper.py
+@@ -34,7 +34,7 @@ from gsplat.cuda._lidar import (
+ )
+ 
+ ExternalDistortionModelMeta = Literal["bivariate-windshield"]
+-CameraModel = Literal["pinhole", "ortho", "fisheye", "ftheta", "lidar"]
++CameraModel = Literal["pinhole", "ortho", "fisheye", "ftheta", "lidar", "equirect"]
+ 
+ 
+ def _make_lazy_cuda_func(name: str) -> Callable:
+diff --git a/gsplat/cuda/csrc/ProjectionEWA3DGSFused.cu b/gsplat/cuda/csrc/ProjectionEWA3DGSFused.cu
+index cffd5c9..cd69b11 100644
+--- a/gsplat/cuda/csrc/ProjectionEWA3DGSFused.cu
++++ b/gsplat/cuda/csrc/ProjectionEWA3DGSFused.cu
+@@ -91,7 +91,10 @@ __global__ void projection_ewa_3dgs_fused_fwd_kernel(
+     // transform Gaussian center to camera space
+     vec3 mean_c;
+     posW2C(R, t, glm::make_vec3(means), mean_c);
+-    if (mean_c.z < near_plane || mean_c.z > far_plane) {
++    // EQUIRECT sees the full sphere: cull by radial distance, not z (z<0 valid).
++    const bool is_equirect = (camera_model == CameraModelType::EQUIRECT);
++    const float depth_c = is_equirect ? glm::length(mean_c) : mean_c.z;
++    if (depth_c < near_plane || depth_c > far_plane) {
+         radii[idx * 2] = 0;
+         radii[idx * 2 + 1] = 0;
+         return;
+@@ -170,6 +173,20 @@ __global__ void projection_ewa_3dgs_fused_fwd_kernel(
+             mean2d
+         );
+         break;
++    case CameraModelType::EQUIRECT: // equirectangular / panorama (T-F8)
++        equirect_proj(
++            mean_c,
++            covar_c,
++            Ks[0],
++            Ks[4],
++            Ks[2],
++            Ks[5],
++            image_width,
++            image_height,
++            covar2d,
++            mean2d
++        );
++        break;
+     }
+ 
+     float compensation;
+@@ -224,7 +241,7 @@ __global__ void projection_ewa_3dgs_fused_fwd_kernel(
+     radii[idx * 2 + 1] = (int32_t)radius_y;
+     means2d[idx * 2] = mean2d.x;
+     means2d[idx * 2 + 1] = mean2d.y;
+-    depths[idx] = mean_c.z;
++    depths[idx] = depth_c; // radial distance for EQUIRECT, z otherwise
+     conics[idx * 3] = covar2d_inv[0][0];
+     conics[idx * 3 + 1] = covar2d_inv[0][1];
+     conics[idx * 3 + 2] = covar2d_inv[1][1];
+@@ -475,10 +492,35 @@ __global__ void projection_ewa_3dgs_fused_bwd_kernel(
+             v_covar_c
+         );
+         break;
++    case CameraModelType::EQUIRECT: // equirectangular / panorama (T-F8)
++        equirect_proj_vjp(
++            mean_c,
++            covar_c,
++            fx,
++            fy,
++            cx,
++            cy,
++            image_width,
++            image_height,
++            v_covar2d,
++            glm::make_vec2(v_means2d),
++            v_mean_c,
++            v_covar_c
++        );
++        break;
+     }
+ 
+     // add contribution from v_depths
+-    v_mean_c.z += v_depths[0];
++    if (camera_model == CameraModelType::EQUIRECT) {
++        // depth = radial distance r = |mean_c| -> d r/d mean_c = mean_c / r
++        float r = glm::length(mean_c) + 1e-7f;
++        float vd = (float)v_depths[0] / r;
++        v_mean_c.x += vd * mean_c.x;
++        v_mean_c.y += vd * mean_c.y;
++        v_mean_c.z += vd * mean_c.z;
++    } else {
++        v_mean_c.z += v_depths[0];
++    }
+ 
+     // vjp: transform Gaussian covariance to camera space
+     vec3 v_mean(0.f);
+diff --git a/gsplat/cuda/ext.cpp b/gsplat/cuda/ext.cpp
+index f2dfe47..e73814d 100644
+--- a/gsplat/cuda/ext.cpp
++++ b/gsplat/cuda/ext.cpp
+@@ -41,6 +41,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+         .value("FISHEYE", gsplat::CameraModelType::FISHEYE)
+         .value("FTHETA", gsplat::CameraModelType::FTHETA)
+         .value("LIDAR", gsplat::CameraModelType::LIDAR)
++        .value("EQUIRECT", gsplat::CameraModelType::EQUIRECT)
+         .export_values();
+ 
+     py::enum_<gsplat::extdist::ModelType>(m, "ExternalDistortionModelType", py::module_local())
+diff --git a/gsplat/cuda/include/Common.h b/gsplat/cuda/include/Common.h
+index e57752e..a195d52 100644
+--- a/gsplat/cuda/include/Common.h
++++ b/gsplat/cuda/include/Common.h
+@@ -68,6 +68,7 @@ enum CameraModelType {
+     FISHEYE = 2,
+     FTHETA = 3,
+     LIDAR = 4,
++    EQUIRECT = 5, // equirectangular / panorama (T-F8)
+ };
+ 
+ #define N_THREADS_PACKED 256
+diff --git a/gsplat/cuda/include/Utils.cuh b/gsplat/cuda/include/Utils.cuh
+index c7bea60..bf22c78 100644
+--- a/gsplat/cuda/include/Utils.cuh
++++ b/gsplat/cuda/include/Utils.cuh
+@@ -800,6 +800,126 @@ inline __device__ void fisheye_proj_vjp(
+     v_mean3d.z += dL_dtz_raw;
+ }
+ 
++// ----------------------------------------------------------------------------
++// EQUIRECTANGULAR (panorama) projection (T-F8). View-space convention matches
++// OmniGS auxiliary.h point3ToLonlatPixel: lon=atan2(x,z), lat=asin(y/r),
++// px=(lon/pi+1)*W/2, py=(lat/(pi/2)+1)*H/2. fx/fy/cx/cy are unused.
++// ----------------------------------------------------------------------------
++#define GS_EQ_PI 3.14159265358979323846f
++
++inline __device__ void equirect_proj(
++    const vec3 mean3d,
++    const mat3 cov3d,
++    const float fx,
++    const float fy,
++    const float cx,
++    const float cy,
++    const uint32_t width,
++    const uint32_t height,
++    mat2 &cov2d,
++    vec2 &mean2d
++) {
++    float x = mean3d[0], y = mean3d[1], z = mean3d[2];
++    const float eps = 1e-7f;
++    float r2 = x * x + y * y + z * z + eps;
++    float r = sqrtf(r2);
++    float rho2 = x * x + z * z + eps;
++    float rho = sqrtf(rho2);
++    float lon = atan2f(x, z);
++    float lat = asinf(fminf(fmaxf(y / r, -0.999999f), 0.999999f));
++    float cwl = (float)width / (2.f * GS_EQ_PI);
++    float chl = (float)height / GS_EQ_PI;
++    mean2d = vec2({(lon / GS_EQ_PI + 1.f) * (0.5f * (float)width),
++                  (lat / (0.5f * GS_EQ_PI) + 1.f) * (0.5f * (float)height)});
++    // mat3x2 = 3 columns (x,y,z) x 2 rows (px,py)
++    mat3x2 J = mat3x2(
++        cwl * z / rho2,            // d px/dx  (col0 row0)
++        -chl * x * y / (rho * r2), // d py/dx  (col0 row1)
++        0.f,                       // d px/dy  (col1 row0)
++        chl * rho / r2,            // d py/dy  (col1 row1)
++        -cwl * x / rho2,           // d px/dz  (col2 row0)
++        -chl * z * y / (rho * r2)  // d py/dz  (col2 row1)
++    );
++    cov2d = J * cov3d * glm::transpose(J);
++}
++
++inline __device__ void equirect_proj_vjp(
++    const vec3 mean3d,
++    const mat3 cov3d,
++    const float fx,
++    const float fy,
++    const float cx,
++    const float cy,
++    const uint32_t width,
++    const uint32_t height,
++    const mat2 v_cov2d,
++    const vec2 v_mean2d,
++    vec3 &v_mean3d,
++    mat3 &v_cov3d
++) {
++    float x = mean3d[0], y = mean3d[1], z = mean3d[2];
++    const float eps = 1e-7f;
++    float r2 = x * x + y * y + z * z + eps;
++    float rho2 = x * x + z * z + eps;
++    float rho = sqrtf(rho2);
++    float cwl = (float)width / (2.f * GS_EQ_PI);
++    float chl = (float)height / GS_EQ_PI;
++
++    float J00 = cwl * z / rho2;             // d px/dx
++    float J01 = -chl * x * y / (rho * r2);  // d py/dx
++    float J11 = chl * rho / r2;             // d py/dy
++    float J20 = -cwl * x / rho2;            // d px/dz
++    float J21 = -chl * z * y / (rho * r2);  // d py/dz
++    // (J10 = d px/dy = 0)
++
++    // 1) grad of mean2d through J: v_mean3d += J^T v_mean2d
++    v_mean3d += vec3(
++        J00 * v_mean2d[0] + J01 * v_mean2d[1],
++        0.f * v_mean2d[0] + J11 * v_mean2d[1],
++        J20 * v_mean2d[0] + J21 * v_mean2d[1]
++    );
++
++    mat3x2 J = mat3x2(J00, J01, 0.f, J11, J20, J21);
++    // 2) grad of cov2d through cov3d: v_cov3d += J^T v_cov2d J
++    v_cov3d += glm::transpose(J) * v_cov2d * J;
++    // 3) grad of cov2d through J(mean3d): v_J then contract with dJ/dmean3d
++    mat3x2 v_J = v_cov2d * J * glm::transpose(cov3d) +
++                 glm::transpose(v_cov2d) * J * cov3d;
++
++    float rho4 = rho2 * rho2;
++    float r4 = r2 * r2;
++    float D = rho * r2, D2 = D * D;
++    float dDdx = x * (r2 + 2.f * rho2) / rho;
++    float dDdy = 2.f * rho * y;
++    float dDdz = z * (r2 + 2.f * rho2) / rho;
++
++    // d(px-row J)/d(.) : depends only on x,z
++    float dJ00dx = -2.f * cwl * x * z / rho4;
++    float dJ00dz = cwl * (x * x - z * z) / rho4;
++    float dJ20dx = cwl * (x * x - z * z) / rho4;
++    float dJ20dz = 2.f * cwl * x * z / rho4;
++    // d(py-row J)/d(.)
++    float dJ01dx = -chl * y / D + chl * x * y * dDdx / D2;
++    float dJ01dy = -chl * x / D + chl * x * y * dDdy / D2;
++    float dJ01dz = chl * x * y * dDdz / D2;
++    float dJ21dx = chl * z * y * dDdx / D2;
++    float dJ21dy = -chl * z / D + chl * z * y * dDdy / D2;
++    float dJ21dz = -chl * y / D + chl * z * y * dDdz / D2;
++    float dJ11dx = chl * x * (1.f / (rho * r2) - 2.f * rho / r4);
++    float dJ11dy = -2.f * chl * rho * y / r4;
++    float dJ11dz = chl * z * (1.f / (rho * r2) - 2.f * rho / r4);
++
++    // contract dJ[col][row]/d(.) with v_J[col][row]
++    float dLdx = dJ00dx * v_J[0][0] + dJ01dx * v_J[0][1] +
++                 dJ11dx * v_J[1][1] + dJ20dx * v_J[2][0] + dJ21dx * v_J[2][1];
++    float dLdy = dJ01dy * v_J[0][1] + dJ11dy * v_J[1][1] + dJ21dy * v_J[2][1];
++    float dLdz = dJ00dz * v_J[0][0] + dJ01dz * v_J[0][1] +
++                 dJ11dz * v_J[1][1] + dJ20dz * v_J[2][0] + dJ21dz * v_J[2][1];
++    v_mean3d.x += dLdx;
++    v_mean3d.y += dLdy;
++    v_mean3d.z += dLdz;
++}
++
+ inline __device__ vec3 safe_normalize(vec3 v) {
+     const float l = v.x * v.x + v.y * v.y + v.z * v.z;
+     return l > 0.0f ? (v * rsqrtf(l)) : v;
