@@ -27,6 +27,8 @@ ap.add_argument("--fps", type=int, default=30)
 ap.add_argument("--secs", type=float, default=8.0)        # per shot
 ap.add_argument("--hfov", type=float, default=70.0)
 ap.add_argument("--mode", default="perspective", choices=["perspective", "equirect"])
+ap.add_argument("--keyframes", default=None, help="director JSON: scene-relative cylindrical keys")
+ap.add_argument("--poi", default=None, help="'auto' or 'x,y,z;x,y,z' world POIs; renders a POI tour")
 a = ap.parse_args()
 W, H = (int(x) for x in a.res.split("x"))
 if a.mode == "equirect":
@@ -125,6 +127,52 @@ def shot_fly(n):
         poses.append(lookat_viewmat(eye, tgt))
     return poses
 
+def detect_pois(k=3):
+    # auto POIs: densest voxels of the gaussian cloud (structure, not sky/fog)
+    P = xyz
+    lo, hi = np.percentile(P, 2, 0), np.percentile(P, 98, 0)
+    G = 20
+    idx = np.clip(((P - lo) / (hi - lo + 1e-9) * G).astype(int), 0, G - 1)
+    keymap = {}
+    for p, c in zip(P, idx):
+        key = tuple(c); keymap.setdefault(key, []).append(p)
+    cells = sorted(keymap.values(), key=len, reverse=True)
+    # spread the top cells (skip near-duplicate centroids)
+    pois = []
+    for cell in cells:
+        c = np.mean(cell, 0)
+        if all(np.linalg.norm(c - q) > 0.3 * radius for q in pois):
+            pois.append(c)
+        if len(pois) >= k: break
+    return pois
+
+def shot_poi_one(poi, n):
+    poses = []
+    for i in range(n):
+        t = ease(i / max(n - 1, 1)); th = math.pi * (0.6 * t - 0.3)   # small arc
+        eye = poi + radius * 0.6 * (math.cos(th) * e1 + math.sin(th) * e2) + 0.12 * radius * up
+        poses.append(lookat_viewmat(eye, poi))                         # dwell/frame the POI
+    return poses
+
+def shot_keyframes(n_total):
+    # director keys: scene-relative cylindrical {az(deg), r(xradius), h(xradius), t(sec)}
+    keys = json.load(open(a.keyframes))["keys"]
+    def eye_of(kf):
+        az = math.radians(kf["az"])
+        return center + kf["r"] * radius * (math.cos(az) * e1 + math.sin(az) * e2) + \
+               (hmean + kf["h"] * radius) * up
+    eyes = np.array([eye_of(k) for k in keys])
+    eyes = np.vstack([eyes[0], eyes, eyes[-1]])                         # pad for catmull
+    ts = [k.get("t", i) for i, k in enumerate(keys)]
+    total = sum(ts) if "t" in keys[0] else len(keys)
+    poses, segs = [], len(eyes) - 3
+    n = int(a.fps * (total if "t" in keys[0] else a.secs * len(keys)))
+    for i in range(n):
+        u = ease(i / max(n - 1, 1)) * segs; s = min(int(u), segs - 1); lt = u - s
+        eye = catmull(eyes[s:s + 4], lt)
+        poses.append(lookat_viewmat(eye, center))
+    return poses
+
 SHOTS = {"orbit": shot_orbit, "fly": shot_fly, "dolly": shot_dolly}
 n_per = int(a.fps * a.secs)
 
@@ -140,10 +188,25 @@ def render(vm):
                              sh_degree=SH, render_mode="RGB")
     return rc[0].clamp(0, 1)
 
+# build the shot list (segment_name -> poses)
+segments = []
+if a.keyframes:
+    segments.append(("keyframes", shot_keyframes(0)))
+elif a.poi:
+    if a.poi == "auto":
+        pois = detect_pois(3)
+    else:
+        pois = [np.array([float(x) for x in p.split(",")]) for p in a.poi.split(";")]
+    print(f"[tour] {len(pois)} POIs")
+    for j, p in enumerate(pois):
+        segments.append((f"poi{j}", shot_poi_one(p, n_per)))
+else:
+    for name in a.shots.split(","):
+        segments.append((name, SHOTS[name](n_per)))
+
 from PIL import Image
 fi = 0
-for name in a.shots.split(","):
-    poses = SHOTS[name](n_per)
+for name, poses in segments:
     print(f"[tour] shot '{name}': {len(poses)} frames")
     with torch.no_grad():
         for vm in poses:

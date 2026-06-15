@@ -66,8 +66,33 @@ bash p4_tour/run_tour.sh <ply> <pano_cams.json> <out.mp4> \
 - **360° 输出更易暴露缺陷**:equirect 全景会把欠观测区的雾化放大,建议重建完整度
   足够再输出。
 
-## 五、后续(MVP → 完整)
-1. 路径编辑:支持手标关键位姿 + 时间,做导演级镜头(当前是程序化 orbit/fly/dolly)。
-2. 后期:稳定/调色/转场/音乐/字幕(NLE 或脚本化 ffmpeg)。
-3. 兴趣点感知路径:结合 GPS/POI 让镜头主动突出景点。
-4. 多场景批量出片 + 360° equirect 成片(重建完整度达标后)。
+## 五、后续任务 —— **全部完成并验证(2026-06-15)**
+
+1. **✅ 导演级关键帧路径** —— `tour_render.py --keyframes <json>`:场景相对柱坐标
+   关键帧(az 方位/r 半径×/h 高度×/t 秒),Catmull-Rom 平滑插值 + look-at 中心。
+   样例 `keyframes_demo.json`(5 关键帧揭示运镜)。验证:`tour_023_director.mp4`(15s)。
+2. **✅ 后期制作** —— `post.sh <in> <out> [标题] [音乐]`:调色(对比/饱和/S 曲线/锐化/
+   暗角)+ 淡入淡出 + 标题字幕 + 可选 BGM(纯 ffmpeg,不重渲)。验证:
+   `tour_023_graded.mp4`(标题"SCENE 023 · 3DGS AERIAL TOUR" + 调色)。
+3. **✅ POI 兴趣点感知路径** —— `tour_render.py --poi auto|x,y,z;...`:auto 用体素密度
+   自动检测最密结构区(避开天空/雾)作 POI,逐个环绕 dwell。验证:`tour_023_poi.mp4`
+   (自动检出 3 个 POI → 3 段运镜)。
+4. **✅ 多场景批量 + 360° equirect** —— `batch_tour.sh`:7 场景各出 highlight + 调色版,
+   外加 scene_023 的 **360° equirect 成片**(走 T-F8 内核)。验证:`p4_tour/out/` 下
+   7×2 普通视频(021–028,横屏 1080p)+ `scene_023_equirect360.mp4`(1024×512 2:1,
+   抽帧确认为有效全景),7/7 成功。
+
+### 产物清单(`p4_tour/out/`,git-ignored,可经 `batch_tour.sh` 复现)
+| 类型 | 文件 | 规格 |
+|---|---|---|
+| 7 场景横屏高光 | `scene_0NN_highlight.mp4` | 1920×1080 18s |
+| 7 场景调色成片 | `scene_0NN_graded.mp4` | 1920×1080 18s(调色+标题) |
+| 360° 全景成片 | `scene_023_equirect360.mp4` | 1024×512 2:1 12s |
+| 导演关键帧 | `tour_023_director.mp4` | 1280×720 15s |
+| POI 兴趣点 | `tour_023_poi.mp4` | 1280×720 12s |
+| 竖屏 | `tour_023_vertical.mp4` | 1080×1920 12s |
+
+### 仍可继续(超出 task2 范围的工程化)
+- 转场:多片段 crossfade(需分镜分段渲染);
+- POI 升级:结合 `.insv` GPS / 人工标注景点;
+- 节奏剪辑:按音乐节拍自动切镜。

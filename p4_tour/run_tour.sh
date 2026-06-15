@@ -22,7 +22,7 @@ docker run --rm --gpus all --ipc=host --ulimit memlock=-1 --ulimit stack=6710886
   -e PYTHONPATH=/w/p3_pano/gsplat -v "$ROOT":/w -w /w $PT bash -c "
   pip install -q --no-deps ninja rich jaxtyping plyfile 2>&1 | tail -1
   python /w/p4_tour/tour_render.py /w/$PLY /w/$CAMS /w/p4_tour/_frames \
-    --shots $SHOTS --res $RES --fps $FPS --secs $SECS --mode $MODE
+    --shots $SHOTS --res $RES --fps $FPS --secs $SECS --mode $MODE ${TOUR_EXTRA:-}
 " 2>&1 | grep -vaE "DEPRECATION|notice|satisfied|Copyright|Various|governed|developer|terms|^==|PyTorch Version|NVIDIA Release|Idiap|Caffe|Google|NEC|Deepmind|Facebook|reserved|NYU|This container|By pulling|^$|SHMEM|recommend|insufficient"
 
 NF=$(ls "$FRAMES"/frame_*.png 2>/dev/null | wc -l)
