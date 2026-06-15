@@ -18,7 +18,7 @@
 | **1. 全景无人机流水线** | `.insv` → equirect → 透视 → COLMAP → 3DGS | 飞行规划、`pano_pipeline/`、scenes 021–028 |
 | **2. 分级优化 P0/P1/P2** | 并行、迭代数、GLOMAP、KSPLAT、直接全景、**VGGT** | `OPTIMIZATION_PLAN.md` |
 | **3. 工程化 backlog (T-A…T-E)** | 全指标、一键流水线、gsplat 基准、窗口 VGGT、BA、SLAM | `tasks.md` |
-| **4. 研究型改进 (T-F1…T-F6)** | 密集 SLAM、gsplat 端到端、全局对齐、BA 解阻、全景 gsplat | `p4_slam/`、`p3_pano/` |
+| **4. 研究型改进 (T-F1…T-F8)** | 密集 SLAM、gsplat 端到端、全局对齐、BA 解阻、**融合 equirect-gsplat 内核** | `p4_slam/`、`p3_pano/` |
 
 ---
 
@@ -35,8 +35,9 @@ equirect 全景帧 (4096×2048)
   │  ★ VGGT 前馈 SfM (秒级, 10–100× 快于 COLMAP, 无需对应点)
   ▼
 相机位姿 + 稠密初始点云 (sparse/0)
-  │  ┌─ 透视管线: INRIA / gsplat 训练
-  │  └─ ★ 直接全景: train_pano.py (LONLAT equirect 光栅化器, 14× 少图, +2.4dB)
+  │  ┌─ 透视管线: INRIA / gsplat 训练 (基线/对照)
+  │  └─ ★ 直接全景 (推荐): 融合 equirect-gsplat 内核 (T-F8, 比 LONLAT 快 1.28×)
+  │       train_pano_gsplat_sph.py / batch_pano.sh 默认; 14× 少图, +2.4dB vs 透视
   ▼
 3DGS 模型 (.ply) → KSPLAT 转换
   ▼
@@ -62,10 +63,15 @@ WebXR 查看器 (PICO 4 Ultra / VR, HTTPS)
 | PSNR | 18.05 | **20.43 (+2.4 dB)** |
 | 训练图像 | 1260 透视裁剪 | **90 全景 (14× 少)** |
 
-### gsplat 后端（T-C1 / T-F2 / T-F6）—— 用对工具
+### gsplat 后端（T-C1 / T-F2 / T-F6 / T-F7 / T-F8）—— 用对工具,并把工具做对
 - **针孔训练**：gsplat 端到端比 INRIA **快 1.55× 且 +1.78 dB**（scene_023，同 holdout/迭代）。
-- **全景训练**：gsplat 立方体方案质量持平但**慢 ~10%**（6 面 3× 像素）→ 全景仍用 LONLAT。
-- 边界清晰：**针孔用 gsplat，全景用 LONLAT**。
+- **全景训练的演进**：
+  - 立方体套 gsplat（T-F6）：质量持平但慢 ~10%（6 面 3× 像素）。
+  - 混合(PyTorch 投影 + gsplat 合成)（T-F7）：定位瓶颈在**投影未融合**。
+  - **融合 equirect-gsplat 内核（T-F8,最终方案）**：给 gsplat 加 `EQUIRECT` 相机模型,
+    手写 equirect 投影**前向+反向 CUDA**(+ 球面裁剪/径向深度)。7 场景验证:平均 PSNR
+    **20.54 vs LONLAT 20.43**,稳定 **~101 it/s vs ~79（快 1.28×）**。
+- 结论：**针孔用 gsplat；全景用融合 equirect-gsplat（T-F8，已超过 LONLAT）**。
 
 ### 流式重建 MASt3R-SLAM（T-E1 / T-F1）
 - 在 torch-2.6/CUDA-12.6 容器（H100 sm_90）**build + run 全部跑通**。
@@ -85,7 +91,7 @@ WebXR 查看器支持 PICO 4 Ultra，`?source=colmap|vggt|pano` 切换，自签 
 | **T-B1** 分块 stitch | ✗ 无加速：ffmpeg v360 本就多线程，并行实例只是抢同核 |
 | **T-D5/T-F4** 经典 BA | BA 流程跑通，但稀疏全景裁剪 inlier 不足 → "skip BA"；佐证前馈 VGGT 才是对的工具 |
 | **T-F3** 全局 Sim3 对齐 | 正确且永不更差，但收益**仅来自闭环**；纯链式航线（本数据）退化为顺序对齐 |
-| **T-F6** gsplat 接全景 | 质量持平但更慢（立方体 3× 像素）→ 全景不用 gsplat |
+| **T-F6/T-F7** gsplat 接全景（立方体/混合） | 质量持平但更慢 → 定位瓶颈=投影未融合（后被 T-F8 解决） |
 
 > 这些"负面"结果划清了每种技术的适用边界，避免了过度工程。
 
@@ -97,7 +103,7 @@ WebXR 查看器支持 PICO 4 Ultra，`?source=colmap|vggt|pano` 切换，自签 
 |---|---|
 | `pano_pipeline/` | 全景流水线核心：`pano_to_perspective.py`、`OPTIMIZATION_PLAN.md`、飞行规划 |
 | `p2_vggt/` | VGGT 前馈 SfM：`vggt_window.py`（窗口+全局 Sim3）、`global_sim3.py`、`run_vggt_ba.sh` |
-| `p3_pano/` | 直接全景 + gsplat：`train_pano.py`（LONLAT）、`train_pano_gsplat.py`（立方体）、`train_gsplat.py`、`bench_raster.py`、`diff_gaussian_rasterization_pano/`（GPLv3，见 `LICENSE-NOTICE.md`） |
+| `p3_pano/` | 直接全景 + gsplat：`train_pano_gsplat_sph.py`（★T-F8 融合,推荐）+ `gsplat_equirect_kernel.patch`（CUDA 内核）、`train_pano.py`（LONLAT）、`train_pano_gsplat.py`（立方体）、`train_gsplat.py`（针孔）、`batch_pano.sh`（默认 T-F8）、`diff_gaussian_rasterization_pano/`（GPLv3 LONLAT，见 `LICENSE-NOTICE.md`） |
 | `p4_slam/` | MASt3R-SLAM：`run_slam_full.sh`、`make_dense_perspective.sh`、`FEASIBILITY.md`、`SETUP.md` |
 | `webxr_viewer/` | PICO 4 / VR 的 WebXR 查看器 |
 | `tasks.md` | 全任务清单与状态（T-A…T-F） |
@@ -119,7 +125,7 @@ WebXR 查看器支持 PICO 4 Ultra，`?source=colmap|vggt|pano` 切换，自签 
 ## 七、给后来者的一句话建议
 
 1. **SfM 用 VGGT**（前馈，秒级，挽救 COLMAP 失败场景）。
-2. **全景重建用直接全景 + LONLAT 光栅化器**（少图、高质、原生 equirect）。
+2. **全景重建用直接全景 + 融合 equirect-gsplat 内核**（T-F8，又快又好，少图、高质、原生 equirect；比 LONLAT 快 1.28×）。LONLAT 作为对照/后备（`BACKEND=lonlat`）。
 3. **针孔/透视训练用 gsplat**（快 1.55×）。
 4. **流式重建用 MASt3R-SLAM**，但要喂**密集前向透视流**（不是稀疏全景）。
 5. 大规模航线的窗口合并用 `global_sim3.py`，**前提是有闭环**。

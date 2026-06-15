@@ -39,19 +39,29 @@ for S in scene_021 scene_022 scene_023 scene_025 scene_026 scene_027 scene_028; 
   sed -i 's#sparse/0/points3D.ply#sparse/0/points.ply#' $PP/pano_cams_${S}.json 2>/dev/null
   [ -f "$PP/pano_cams_${S}.json" ] || { echo "[$S] POSE FAILED"; continue; }
 
-  # 3) direct-pano training + eval (PSNR/SSIM/LPIPS). TORCH_HOME caches lpips VGG.
-  docker run --rm --gpus all --ipc=host --ulimit memlock=-1 --ulimit stack=67108864 --user 0:0 \
-    -e TORCH_HOME=/wcache -v $ROOT:/workspace/gaussian-splatting \
-    -v $ROOT/p2_vggt/weights:/wcache nvcr.io/nvidia/pytorch:24.12-py3 bash -c "
-      set -e
-      mkdir -p /wcache/hub/checkpoints
-      cd /workspace/gaussian-splatting
-      pip install -q --no-deps plyfile opencv-python joblib \
-        submodules/diff-gaussian-rasterization submodules/simple-knn submodules/fused-ssim >/dev/null 2>&1
-      pip install -q --no-deps -e p3_pano/diff_gaussian_rasterization_pano >/dev/null 2>&1
-      python p3_pano/train_pano.py p3_pano/pano_cams_${S}.json \
-        data/8kpano/scenes/${S}_pano/output_pano $ITERS $WID 2>&1 | tail -25" \
-    > $LOG/${S}_pano_train.log 2>&1
+  # 3) direct-pano training + eval (PSNR/SSIM/LPIPS).
+  # Default backend: fused equirect-gsplat CUDA kernel (T-F8) — ~1.28x faster than
+  # LONLAT at parity quality (see OPTIMIZATION_PLAN.md). BACKEND=lonlat for the
+  # legacy OmniGS rasterizer.
+  BACKEND=${BACKEND:-fused}
+  if [ "$BACKEND" = "lonlat" ]; then
+    docker run --rm --gpus all --ipc=host --ulimit memlock=-1 --ulimit stack=67108864 --user 0:0 \
+      -e TORCH_HOME=/wcache -v $ROOT:/workspace/gaussian-splatting \
+      -v $ROOT/p2_vggt/weights:/wcache nvcr.io/nvidia/pytorch:24.12-py3 bash -c "
+        set -e
+        mkdir -p /wcache/hub/checkpoints
+        cd /workspace/gaussian-splatting
+        pip install -q --no-deps plyfile opencv-python joblib \
+          submodules/diff-gaussian-rasterization submodules/simple-knn submodules/fused-ssim >/dev/null 2>&1
+        pip install -q --no-deps -e p3_pano/diff_gaussian_rasterization_pano >/dev/null 2>&1
+        python p3_pano/train_pano.py p3_pano/pano_cams_${S}.json \
+          data/8kpano/scenes/${S}_pano/output_pano $ITERS $WID 2>&1 | tail -25" \
+      > $LOG/${S}_pano_train.log 2>&1
+  else
+    GSPLAT_EQUIRECT_FUSED=1 bash $PP/run_pano_gsplat_train.sh \
+      p3_pano/pano_cams_${S}.json data/8kpano/scenes/${S}_pano/output_pano $ITERS $WID 512 sph \
+      > $LOG/${S}_pano_train.log 2>&1
+  fi
   echo "[$S] $(grep -E '\[EVAL\]|\[DONE\]|FAILED|Error' $LOG/${S}_pano_train.log | tail -2)"
   # ksplat for viewer
   PLY=$D/output_pano/point_cloud/iteration_${ITERS}/point_cloud.ply

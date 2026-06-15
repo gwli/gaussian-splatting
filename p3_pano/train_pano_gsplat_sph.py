@@ -101,6 +101,28 @@ for step in range(ITERS):
               f"{(step+1)/(time.time()-t0):.1f} it/s", flush=True)
 torch.cuda.synchronize(); dt = time.time() - t0
 
+# save INRIA-format ply (for ksplat / viewers) — matches scene.gaussian_model.save_ply
+from plyfile import PlyData as _PD, PlyElement as _PE
+with torch.no_grad():
+    xyz = splats["means"].detach().cpu().numpy()
+    f_dc = splats["sh0"].detach().transpose(1, 2).flatten(1).cpu().numpy()    # (N,3)
+    f_rest = splats["shN"].detach().transpose(1, 2).flatten(1).cpu().numpy()  # (N,45)
+    opac = splats["opacities"].detach().cpu().numpy().reshape(-1, 1)
+    scal = splats["scales"].detach().cpu().numpy()
+    rot = splats["quats"].detach().cpu().numpy()
+    Ng = xyz.shape[0]
+    fields = (["x", "y", "z", "nx", "ny", "nz"] + [f"f_dc_{i}" for i in range(3)] +
+              [f"f_rest_{i}" for i in range(f_rest.shape[1])] + ["opacity"] +
+              [f"scale_{i}" for i in range(3)] + [f"rot_{i}" for i in range(4)])
+    arr = np.concatenate([xyz, np.zeros((Ng, 3), np.float32), f_dc, f_rest, opac, scal, rot], 1).astype(np.float32)
+    elems = np.empty(Ng, dtype=[(f, "f4") for f in fields])
+    for i, f in enumerate(fields):
+        elems[f] = arr[:, i]
+    pc_dir = os.path.join(out_dir, f"point_cloud/iteration_{ITERS}")
+    os.makedirs(pc_dir, exist_ok=True)
+    _PD([_PE.describe(elems, "vertex")]).write(os.path.join(pc_dir, "point_cloud.ply"))
+    print(f"[PLY] saved {Ng} gaussians -> {pc_dir}/point_cloud.ply")
+
 def psnr(a, b): return float(-10 * torch.log10(((a - b) ** 2).mean()))
 try:
     sys.path.insert(0, REPO); from lpipsPyTorch import lpips as _lpips; HAVE = True
