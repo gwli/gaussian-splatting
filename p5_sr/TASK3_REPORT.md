@@ -85,6 +85,23 @@ run_sr.sh = ①→⑥ 编排器
 > 关于全分辨率成本:`nlmeans` 去噪在 1920×960 仅 0.34 fps(60 帧 174 s),对 8K 不可行,
 > 故默认 `hqdn3d`(快);`DENOISE=nlmeans` 为高质量可选项。8K 全片建议后台批处理。
 
+### 全 8K 成片验证(scene 027,真实整片切段)
+
+`VID_20260502_053911_027.insv` = **841.7s / 25226 帧 / 双 3840² 双鱼眼**。取 t≈50–80s
+的**水乡古镇航拍**段(canals + 传统屋顶,全片最佳旅游素材),跑全分辨率成片:
+
+```
+CAP_W=7680 PRESET=faster run_sr.sh ...027.insv scene_027_8k_highlight.mp4 enhance ffmpeg 30 50
+② stitch  : 双鱼眼 → 7680×3840 equirect, 900 帧, 847s(1.06 fps), 560 MB
+③ enhance : hqdn3d+deband+unsharp+grain @ 8K, 900 帧, 1062s(0.85 fps), 950 MB
+⑤ inject  : Spherical=true / equirectangular ✅
+⑥ validate: 6/6 PASS — 7680×3840 / 2:1 / hevc / yuv420p / faststart / 球面元数据 / 可解码
+产物      : p5_sr/out/scene_027_8k_highlight.mp4  (30s, 7680×3840, 995 MB)
+```
+
+抽帧确认为**完整 360° equirect**(两半球都已填充:中带水乡航拍,极点天空/地面有双鱼眼
+平均混合的缝合带)。**端到端约 32 分钟**(本机 H100 无 NVENC,纯 CPU x265;`faster` 预设)。
+
 ## 四、用法
 
 ```bash

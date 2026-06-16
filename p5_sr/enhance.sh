@@ -29,7 +29,7 @@ if [ "$NVENC" = "1" ]; then
   VENC="-c:v hevc_nvenc -preset p5 -rc vbr -cq $CRF -b:v 0 -tag:v hvc1 -g $GOP"
   GPUFLAG="--gpus all"
 else
-  VENC="-c:v libx265 -preset medium -crf $CRF -tag:v hvc1 -x265-params keyint=$GOP"
+  VENC="-c:v libx265 -preset ${PRESET:-medium} -crf $CRF -tag:v hvc1 -x265-params keyint=$GOP"
   GPUFLAG=""
 fi
 OUTOPT="-pix_fmt yuv420p -movflags +faststart -colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range tv"

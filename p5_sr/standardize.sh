@@ -44,7 +44,7 @@ echo ">> [standardize] layout=$P_LAYOUT mode=$MODE -> ${W}x${H}@${FPS}fps  out=$
 
 TRIM=""; [ -n "$SECS" ] && TRIM="-ss $SS -t $SECS"
 COLOR="-colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range tv"
-ENC="-c:v libx265 -preset medium -crf 18 -pix_fmt yuv420p -tag:v hvc1 -movflags +faststart"
+ENC="-c:v libx265 -preset ${PRESET:-medium} -crf 18 -pix_fmt yuv420p -tag:v hvc1 -movflags +faststart"
 
 if [ "$MODE" = "stitch" ]; then
   # dual-fisheye -> equirect (front lens yaw 0, back lens yaw 180), blend the seam.
