@@ -92,7 +92,12 @@ bash p4_tour/run_tour.sh <ply> <pano_cams.json> <out.mp4> \
 | POI 兴趣点 | `tour_023_poi.mp4` | 1280×720 12s |
 | 竖屏 | `tour_023_vertical.mp4` | 1080×1920 12s |
 
+5. **✅ 多段 crossfade 转场** —— `tour_xfade.sh`:每个镜头**分段渲染成独立 clip**
+   (`tour_render.py --split` 写 per-shot 子目录 + `segments.json` 清单),再用 ffmpeg
+   `xfade` 链式交叉淡化(支持变长 clip,按清单计算累积 offset;转场类型可选
+   fade/dissolve/wipe…)。验证:`tour_023_xfade.mp4`,3 镜头各 4s + 1s 转场 →
+   **时长精确 10.00s(3×4−2×1)**,抽帧确认转场处为两视角融合的叠化。
+
 ### 仍可继续(超出 task2 范围的工程化)
-- 转场:多片段 crossfade(需分镜分段渲染);
 - POI 升级:结合 `.insv` GPS / 人工标注景点;
 - 节奏剪辑:按音乐节拍自动切镜。

@@ -29,6 +29,7 @@ ap.add_argument("--hfov", type=float, default=70.0)
 ap.add_argument("--mode", default="perspective", choices=["perspective", "equirect"])
 ap.add_argument("--keyframes", default=None, help="director JSON: scene-relative cylindrical keys")
 ap.add_argument("--poi", default=None, help="'auto' or 'x,y,z;x,y,z' world POIs; renders a POI tour")
+ap.add_argument("--split", action="store_true", help="write each shot to its own subdir + manifest (for crossfade)")
 a = ap.parse_args()
 W, H = (int(x) for x in a.res.split("x"))
 if a.mode == "equirect":
@@ -206,11 +207,22 @@ else:
 
 from PIL import Image
 fi = 0
-for name, poses in segments:
+manifest = []
+for si, (name, poses) in enumerate(segments):
     print(f"[tour] shot '{name}': {len(poses)} frames")
+    if a.split:
+        segdir = os.path.join(a.outdir, f"seg{si:02d}_{name}")
+        os.makedirs(segdir, exist_ok=True)
+        manifest.append({"idx": si, "name": name, "nframes": len(poses), "dir": os.path.basename(segdir)})
     with torch.no_grad():
-        for vm in poses:
+        for j, vm in enumerate(poses):
             img = (render(vm).cpu().numpy() * 255).astype(np.uint8)
-            Image.fromarray(img).save(os.path.join(a.outdir, f"frame_{fi:05d}.png"))
+            if a.split:
+                Image.fromarray(img).save(os.path.join(segdir, f"frame_{j:05d}.png"))
+            else:
+                Image.fromarray(img).save(os.path.join(a.outdir, f"frame_{fi:05d}.png"))
             fi += 1
+if a.split:
+    json.dump({"fps": a.fps, "segments": manifest}, open(os.path.join(a.outdir, "segments.json"), "w"), indent=1)
+    print(f"[tour] split manifest: {len(manifest)} segments")
 print(f"[tour] wrote {fi} frames ({W}x{H}) to {a.outdir}")
