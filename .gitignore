@@ -9,3 +9,6 @@ screenshots
 p3_pano/.torch_ext_cache/
 p3_pano/gsplat/
 data/
+p5_sr/_work/
+p5_sr/weights/
+p5_sr/spatial_media/
