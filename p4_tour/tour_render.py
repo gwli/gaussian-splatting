@@ -12,7 +12,7 @@ Usage: tour_render.py <ply> <pano_cams.json> <out_frame_dir>
          [--shots orbit,fly,dolly] [--res 1920x1080] [--fps 30] [--secs 8]
          [--hfov 70] [--mode perspective|equirect]
 """
-import sys, os, json, math, argparse, numpy as np, torch
+import sys, os, re, json, math, argparse, numpy as np, torch
 from plyfile import PlyData
 REPO = "/w" if os.path.exists("/w/p3_pano/gsplat_equirect.py") else "/raid/git/gaussian-splatting"
 sys.path.insert(0, REPO + "/p3_pano")
@@ -30,6 +30,9 @@ ap.add_argument("--mode", default="perspective", choices=["perspective", "equire
 ap.add_argument("--keyframes", default=None, help="director JSON: scene-relative cylindrical keys")
 ap.add_argument("--poi", default=None, help="'auto' or 'x,y,z;x,y,z' world POIs; renders a POI tour")
 ap.add_argument("--split", action="store_true", help="write each shot to its own subdir + manifest (for crossfade)")
+ap.add_argument("--poi-gps", dest="poi_gps", default=None, help="'lat,lon,alt;...' GPS POIs (needs --align)")
+ap.add_argument("--align", default=None, help="gps_align.py output json (Sim3 GPS->scene)")
+ap.add_argument("--poi-pano", dest="poi_pano", default=None, help="'idx:u,v;...' manual POI by pano pixel (u,v in 0..1)")
 a = ap.parse_args()
 W, H = (int(x) for x in a.res.split("x"))
 if a.mode == "equirect":
@@ -190,15 +193,47 @@ def render(vm):
     return rc[0].clamp(0, 1)
 
 # build the shot list (segment_name -> poses)
+def gps_to_scene(lat, lon, alt, al):
+    lat0, lon0, alt0 = al["lat0"], al["lon0"], al["alt0"]
+    dN = (lat - lat0) * 111320.0
+    dE = (lon - lon0) * 111320.0 * math.cos(math.radians(lat0))
+    enu = np.array([dE, dN, alt - alt0])
+    return al["scale"] * (np.array(al["R"]) @ enu) + np.array(al["t"])
+
+def pano_pixel_to_poi(idx, u, v):
+    # manual POI: back-project an equirect pixel (u,v in 0..1) of pano `idx` into
+    # the scene by marching the ray to the nearest gaussian (LONLAT convention).
+    c = next(c for c in meta["cameras"] if c["idx"] == int(idx))
+    R = np.array(c["R_wp"], float); C0 = np.array(c["C"], float)
+    lon = (2 * u - 1) * math.pi; lat = (2 * v - 1) * (math.pi / 2)
+    d_view = np.array([math.cos(lat) * math.sin(lon), math.sin(lat), math.cos(lat) * math.cos(lon)])
+    d = R.T @ d_view; d /= np.linalg.norm(d)            # world ray dir (R is world->view)
+    rel = xyz - C0
+    tproj = rel @ d
+    perp = np.linalg.norm(rel - np.outer(tproj, d), axis=1)
+    m = (tproj > 0.02 * radius) & (perp < 0.06 * radius)
+    if not m.any():
+        return C0 + d * radius
+    cand = np.where(m)[0]
+    return xyz[cand[np.argmin(tproj[cand])]]            # nearest gaussian along the ray
+
 segments = []
 if a.keyframes:
     segments.append(("keyframes", shot_keyframes(0)))
-elif a.poi:
+elif a.poi or a.poi_gps or a.poi_pano:
+    pois = []
     if a.poi == "auto":
-        pois = detect_pois(3)
-    else:
-        pois = [np.array([float(x) for x in p.split(",")]) for p in a.poi.split(";")]
-    print(f"[tour] {len(pois)} POIs")
+        pois += detect_pois(3)
+    elif a.poi:
+        pois += [np.array([float(x) for x in p.split(",")]) for p in re.split(r"[;+]", a.poi)]
+    if a.poi_gps:
+        al = json.load(open(a.align))
+        pois += [gps_to_scene(*[float(x) for x in p.split(",")], al) for p in re.split(r"[;+]", a.poi_gps)]
+    if a.poi_pano:
+        for p in re.split(r"[;+]", a.poi_pano):
+            idx, uv = p.split(":"); u, v = (float(x) for x in uv.split(","))
+            pois.append(pano_pixel_to_poi(idx, u, v))
+    print(f"[tour] {len(pois)} POIs: {[np.round(p,2).tolist() for p in pois]}")
     for j, p in enumerate(pois):
         segments.append((f"poi{j}", shot_poi_one(p, n_per)))
 else:

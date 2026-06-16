@@ -98,6 +98,19 @@ bash p4_tour/run_tour.sh <ply> <pano_cams.json> <out.mp4> \
    fade/dissolve/wipe…)。验证:`tour_023_xfade.mp4`,3 镜头各 4s + 1s 转场 →
    **时长精确 10.00s(3×4−2×1)**,抽帧确认转场处为两视角融合的叠化。
 
+6. **✅ GPS 尺度/方向对齐 + GPS POI**(task2 步骤 3 的 GPS 部分)——
+   `gps_align.py`:GPS 轨迹 → 局部 ENU 米 → 与各全景相机中心做 Umeyama Sim3 拟合,
+   得到**米制尺度 + 朝北方向 + 残差**,并把任意 GPS POI(lat,lon,alt)映射到场景坐标
+   (`tour_render.py --poi-gps "lat,lon,alt;..." --align align.json`)。
+   **关于本数据的诚实结论**:`scene_023.insv` **不含 GPS/IMU**(exiftool 12.57 只有
+   15 个 QuickTime 标签,无遥测轨道;唯一逐帧字幕是对焦值 `F:xxxx`,不是 GPS)——
+   这架无人机这趟没记 GPS。故真实对齐在本数据上 N/A;`--selftest` 用合成 GPS 验证了
+   数学正确:**尺度 0.020→0.020(误差 0.36%)、GPS→场景 POI 误差 0.002**,代码对任何
+   带 GPS 的素材即插即用(`exiftool -ee -p '$GPSLatitude,...'` 抽取后喂 `gps_align.py`)。
+7. **✅ 人工 POI(全景像素拾取)** —— `tour_render.py --poi-pano "idx:u,v;..."`:在某张
+   全景图上点一个像素(u,v∈0..1)→ 按 LONLAT 约定反投射光线 → 沿光线找最近高斯 → 3D POI。
+   验证(真实 scene_023):像素 (0.5,0.55) of pano 1/45 → 反投射到真实场景点
+   `[0.04,0.08,0.08]` / `[0.04,0.03,0.11]`,各环绕成镜。多 POI 用 `+` 分隔(shell 安全)。
+
 ### 仍可继续(超出 task2 范围的工程化)
-- POI 升级:结合 `.insv` GPS / 人工标注景点;
 - 节奏剪辑:按音乐节拍自动切镜。
