@@ -112,5 +112,13 @@ bash p4_tour/run_tour.sh <ply> <pano_cams.json> <out.mp4> \
    验证(真实 scene_023):像素 (0.5,0.55) of pano 1/45 → 反投射到真实场景点
    `[0.04,0.08,0.08]` / `[0.04,0.03,0.11]`,各环绕成镜。多 POI 用 `+` 分隔(shell 安全)。
 
-### 仍可继续(超出 task2 范围的工程化)
-- 节奏剪辑:按音乐节拍自动切镜。
+8. **✅ 按节拍自动切镜(beat-synced auto-cut)** —— `beat_cut.sh` + `beat_sync.py`:
+   分镜渲染成 clip → 检测音乐节拍 → 在节拍上**硬切**镜头(循环 orbit/fly/dolly)→ 混入音乐。
+   节拍检测是**自带 numpy 实现**(谱通量 onset → 自相关测速 → 节拍相位),无需 librosa;
+   读 WAV 用标准库 `wave`;无音乐素材时可 `gen-click` 合成节拍轨。验证(scene_023,
+   合成 120bpm):检测 **117.5 bpm / 23 拍 → 每 2 拍切一次 = 13 段**,输出
+   `tour_023_beatcut.mp4`(12.00s,1280×720 H264 **+ AAC 音频**,节拍对齐硬切)。
+
+### 后续任务全部完成 ✅(8/8)
+task2 §五 列出的所有后续(导演关键帧 / 后期 / POI / 批量+360° / crossfade /
+GPS 对齐 / 人工 POI / 按节拍切镜)均已实现并验证。
