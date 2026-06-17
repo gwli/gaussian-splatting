@@ -66,7 +66,61 @@ GT = 连续 16 帧 1024² 原生裁块,LR = ÷4(更重的退化),对比逐帧 SI
 **面向 task3 的落地建议**:给 `enhance.sh` 增加 `swinir` 与 `vsr`(Real-BasicVSR)两个引擎;
 8K 成片走 **VSR**(时间一致),快速预览走 lanczos;cubemap 仅在素材极点细节丰富时启用。
 
-## 五、实现清单(`p5_sr/sr_methods/`)
+## 五、性能差异原因分析
+
+### 5.1 画质差异 —— 为什么排名是这样
+
+**(a) 退化强度 × 模型训练分布(最关键)**
+Real-ESRGAN / Real-BasicVSR 都是在**重度合成退化**(多次模糊+降采样+噪声+JPEG/视频压缩)上训练的。
+- 喂**轻退化**(干净 ÷2)→ 输入分布与训练不符,模型仍按"重退化"假设强行去模糊/造纹理,
+  结果**过处理**、编出偏离 GT 的细节 → ÷2 时 Real-ESRGAN 的 LPIPS 最差(0.305)。
+- 喂**重退化**(÷4)→ 正中训练分布 → Real-BasicVSR 在 ÷4 全面领先。
+→ "哪个 SR 好"高度依赖**退化强度要与模型训练分布匹配**。
+
+**(b) 指标本身偏向保真,而 GAN 用保真换感知**
+PSNR/SSIM 度量"逐像素贴近 GT"。GAN(Real-ESRGAN)主动**牺牲保真换视觉锐利**,
+会在 PSNR 上吃亏;当 GT 又偏软(8K 已被 x265 压过)时,**插值(lanczos)天然最贴 GT**,
+所以 lanczos 在轻退化下 PSNR 反而最高 —— 这是 SR 基准的经典"PSNR≠观感"陷阱,故我们同时报 LPIPS。
+
+**(c) SwinIR 为何"细节最强且保真不掉"**
+SwinIR 是 **L1 重建训练(非 GAN)+ 窗口自注意力**:
+- 非 GAN → 不编假纹理 → 保真(SSIM 0.9962)与 lanczos 持平;
+- 自注意力的**长程上下文**比 RRDBNet 的局部卷积更会"推断"真实高频 → sharpness 629(其它 3×),
+  且这些高频是**贴合 GT 的**(LPIPS 0.243 优于 RRDBNet)。
+→ 单帧"既要细节又要保真"它最优。
+
+**(d) cubemap 为何反而更差**
+equirect→cube→SR→cube→equirect 要做**两次 grid_sample 双线性重采样**,每次都是一次低通(模糊)。
+该模糊是确定的损失;而 cube 的收益(均匀采样、消除极点拉伸)只有当**极点本身有高频细节**时才兑现。
+本片极点是天空/地面(低频),赤道才是航拍地物(高频)→ **收益≈0,损失实打实** → PSNR/sharpness 双降。
+
+**(e) VSR 为何质量+稳定双赢**
+- **质量**:相邻帧之间有**亚像素位移**,双向传播 + 光流对齐把多帧信息聚合到当前帧,
+  等于"多帧融合超分",比单帧凭空猜更接近真值 → ÷4 时 PSNR 比逐帧 RRDBNet +1.12dB。
+- **时间一致性**:SISR 逐帧独立 → 每帧"猜"的高频不一样 → 闪烁;VSR 的循环状态让相邻帧
+  共享传播特征 → warp-error 2.20 vs 2.72(**闪烁 −19%**)。这是单帧方法**结构上补不了**的。
+
+### 5.2 速度差异 —— 为什么差几十倍
+
+| 方法 | s/帧(×2,~1K) | 计算结构 | 慢/快的根因 |
+|---|---|---|---|
+| lanczos | 0.03 | 固定可分离卷积核 | 无网络,O(像素),CPU 即可 |
+| RRDBNet | 0.14 | 23 个残差稠密块,纯卷积,**在 LR 分辨率算**最后 pixelshuffle 上采 | 卷积对 GPU/tensor-core 友好,且大部分算力在低分辨率 |
+| SwinIR | 5.24 | 窗口自注意力(transformer)多层,**接近输入分辨率算** | 注意力 + LayerNorm/GELU 开销大;**fp16 会 NaN → 只能 fp32**,吃不到 tensor-core 加速 → 比 RRDBNet 慢 ~35× |
+| VSR | 重(×4) | 逐帧卷积传播 + SPyNet 6 级光流金字塔 + **双向两遍** + warp | 比 RRDBNet 多了光流估计与双向遍历;且 ×4、需按窗口分块控显存 |
+
+要点:
+- **算在什么分辨率上**决定成本量级:RRDBNet/ESRGAN 主体在 LR 算(便宜),SwinIR 在高分辨率做注意力(贵)。
+- **fp16 可用性**:RRDBNet/VSR 支持 fp16(tensor-core 提速~2×);**SwinIR fp16 数值溢出(softmax/LayerNorm 动态范围)→ 强制 fp32**,既慢又占显存。
+- **VSR 的显存**正比于"窗口帧数 × 输出分辨率",故必须**滑窗分块**(本实现 `VSR_WIN/VSR_OVERLAP`);
+  8K 成片应"低分辨率拼接(如 1920×960)→ VSR ×4 → 8K",而非在 8K 上直接超分。
+
+### 5.3 选型速记
+- 要快/保真、退化轻 → **lanczos(ffmpeg)**;要单帧真细节 → **SwinIR**(慢但最好);
+- 老旧/重压缩素材 → **Real-ESRGAN**;**视频成片 → Real-BasicVSR(VSR)**(质量+不闪);
+- 仅当极点有细节 → 加 **cubemap**。
+
+## 六、实现清单(`p5_sr/sr_methods/`)
 - `sr_lib.py` —— RRDBNet / SwinIR 加载、tiled 推理、equirect↔cubemap(torch grid_sample,
   往返误差 0.002)、统一 dispatch。
 - `vendor/network_swinir.py` —— 官方 SwinIR 架构(权重 key 对齐)。
