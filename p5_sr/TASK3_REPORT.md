@@ -106,16 +106,22 @@ CAP_W=7680 PRESET=faster run_sr.sh ...027.insv scene_027_8k_highlight.mp4 enhanc
 
 ```bash
 # 一键:任意 .insv/equirect → 发布级 360 mp4
-bash p5_sr/run_sr.sh <input> <out.mp4> [2x|enhance] [ffmpeg|realesrgan] [secs] [ss]
+#   run_sr.sh <input> <out.mp4> [2x|enhance] [vsr|ffmpeg|realesrgan|swinir] [secs] [ss]
+# 默认引擎 = vsr(Real-BasicVSR),默认 TARGET_W=7680(8K);stitch 宽度按引擎自动
+# 取 TARGET_W/SR倍率(vsr ×4 → 拼 1920×960 → 8K),无需手动设 CAP_W。
 
-# 例:8K 同分辨率画质增强(保持 7680x3840)
+# 例:默认 = VSR 8K 视频超分成片(质量+时间一致性最佳)
+bash p5_sr/run_sr.sh data/8kpano/VID_..._027.insv out/vsr.mp4 "" "" 30 50
+
+# 例:快速 8K 同分辨率增强(无模型,最快)
 bash p5_sr/run_sr.sh data/8kpano/VID_..._024.insv out/enh.mp4 enhance ffmpeg
 
-# 例:2x 模型超分(Real-ESRGAN)
-SCALE=2 TILE=512 bash p5_sr/run_sr.sh data/8kpano/VID_..._024.insv out/sr.mp4 2x realesrgan
+# 例:单帧 SwinIR 2x(细节最强);Real-ESRGAN 适合重度退化老素材
+bash p5_sr/run_sr.sh data/8kpano/VID_..._024.insv out/sw.mp4 2x swinir
 
-# 分阶段也可单独调用 probe360.py / standardize.sh / enhance.sh / inject360.sh / validate.sh
+# 改最终分辨率:TARGET_W=3840 出 4K;分阶段亦可单独调 probe360/standardize/enhance/inject360/validate
 ```
+> 引擎对比与选型依据见 `p5_sr/sr_methods/SR_COMPARISON.md`。
 
 env:`CAP_W`(限制输出宽,默认 7680)`IFOV`(鱼眼视场,默认 200)`SCALE`(2|4)
 `TILE`/`FP16`(模型分块/半精)`CRF` `NVENC` `DENOISE`(hqdn3d|nlmeans|none)`MODEL`(权重 URL)。
