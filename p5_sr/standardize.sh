@@ -47,10 +47,20 @@ COLOR="-colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range tv
 ENC="-c:v libx265 -preset ${PRESET:-medium} -crf 18 -pix_fmt yuv420p -tag:v hvc1 -movflags +faststart"
 
 if [ "$MODE" = "stitch" ]; then
-  # dual-fisheye -> equirect (front lens yaw 0, back lens yaw 180), blend the seam.
+  # dual-fisheye -> equirect. Empirically lens1 (input [b], pitch=-90) fills the TOP
+  # hemisphere and lens0 (input [a], pitch=90) the BOTTOM. The old `blend=average`
+  # averaged BOTH lenses over the WHOLE frame, so the equator got the two fisheyes'
+  # over-stretched, vignetted 200-deg rims (+ exposure mismatch + sky bleed) -> a
+  # bright/blurry horizontal seam band.
+  # Fix: latitude-masked feather — top rows use B, bottom rows use A, cross-fade ONLY
+  # within a narrow band (+-FEATHER_FRAC of H) around the equator, so each lens stays
+  # away from its worst rim. FEATHER_FRAC ~0.05 (~9 deg) sits inside the lenses'
+  # overlap (IFOV-180 deg).
+  FR="${FEATHER_FRAC:-0.05}"
+  EXPR="if(lt(Y,H/2-H*$FR),B,if(gt(Y,H/2+H*$FR),A,(B*(H/2+H*$FR-Y)+A*(Y-(H/2-H*$FR)))/(H*2*$FR)))"
   FC="[0:0]v360=input=fisheye:output=equirect:ih_fov=$IFOV:iv_fov=$IFOV:pitch=90,scale=$W:$H[a];\
 [0:1]v360=input=fisheye:output=equirect:ih_fov=$IFOV:iv_fov=$IFOV:pitch=-90,scale=$W:$H[b];\
-[a][b]blend=all_mode=average,fps=$FPS,format=yuv420p[v]"
+[a][b]blend=all_expr='$EXPR',fps=$FPS,format=yuv420p[v]"
   docker run --rm --gpus all --user 0:0 -v "$ROOT":/w $FF -y $TRIM -i "/w/${IN#$ROOT/}" \
     -filter_complex "$FC" -map "[v]" $COLOR $ENC -an -sn "/w/${OUT#$ROOT/}" 2>&1 | tail -2
 else
