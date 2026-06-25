@@ -19,7 +19,7 @@ echo "[$S] dur=${DUR}s fps=$FPS for $STITCH_NP panos (SEL=$SEL)"
 echo "[1/3] stitch panoramas (kept)..."
 docker run --rm --gpus all --user 0:0 -v $ROOT/data/8kpano:/data $FF \
   -hwaccel cuda -i /data/$INSV \
-  -filter_complex "[0:0]v360=input=fisheye:output=equirect:ih_fov=200:iv_fov=200:pitch=90[a];[0:1]v360=input=fisheye:output=equirect:ih_fov=200:iv_fov=200:pitch=-90[b];[a][b]blend=all_mode=average,fps=$FPS,scale=4096:2048" \
+  -filter_complex "[0:0]v360=input=fisheye:output=equirect:ih_fov=200:iv_fov=200:pitch=90[a];[0:1]v360=input=fisheye:output=equirect:ih_fov=200:iv_fov=200:pitch=-90[b];[a][b]blend=all_mode=average,fps=$FPS,scale=${STITCH_RES:-4096:2048}" \
   -q:v 2 /data/scenes/${S}_pano/panoramas/pano_%04d.jpg 2>&1 | tail -1
 echo "  panos: $(ls $D/panoramas/*.jpg | wc -l)"
 
@@ -92,7 +92,7 @@ docker run --rm --gpus all --ipc=host --ulimit memlock=-1 --ulimit stack=6710886
   mkdir -p /th
   pip install -q --no-deps einops safetensors trimesh huggingface_hub 'pycolmap==3.10.0' 2>&1 | tail -1
   cd /w/p2_vggt/vggt && export PYTHONPATH=\$PWD
-  python demo_colmap.py --scene_dir /w/data/8kpano/scenes/${S}_pano --conf_thres_value 1.5 2>&1 | tail -6
+  python demo_colmap.py --scene_dir /w/data/8kpano/scenes/${S}_pano --conf_thres_value ${VGGT_CONF:-1.5} 2>&1 | tail -6
 " 2>&1 | grep -vE "DEPRECATION|notice|satisfied|Copyright|Various|governed|developer|terms|^==|PyTorch Version|NVIDIA Release|Idiap|Caffe|Google|NEC|Deepmind|Facebook|reserved|NYU|This container|By pulling|^$"
 # restructure sparse → sparse/0
 if [ -f "$D/sparse/cameras.bin" ]; then mkdir -p "$D/sparse/0"; mv "$D/sparse"/*.bin "$D/sparse/0/" 2>/dev/null||true; mv "$D/sparse"/*.ply "$D/sparse/0/" 2>/dev/null||true; fi
