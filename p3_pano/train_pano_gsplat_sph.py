@@ -52,7 +52,13 @@ splats = torch.nn.ParameterDict({
 lrs = {"means": 0.00016 * extent, "scales": 0.005, "quats": 0.001,
        "opacities": 0.05, "sh0": 0.0025, "shN": 0.0025 / 20}
 opt = {k: torch.optim.Adam([{"params": splats[k], "lr": lr}], eps=1e-15) for k, lr in lrs.items()}
-strat = DefaultStrategy(verbose=False, refine_stop_iter=int(ITERS * 0.5), reset_every=3000, refine_every=100)
+# densification knobs (env): lower GROW_GRAD2D -> grow more gaussians; higher
+# REFINE_STOP_FRAC -> keep densifying longer. Defaults = gsplat DefaultStrategy.
+_GG = float(os.environ.get("GROW_GRAD2D", "0.0002"))
+_RSF = float(os.environ.get("REFINE_STOP_FRAC", "0.5"))
+strat = DefaultStrategy(verbose=False, refine_stop_iter=int(ITERS * _RSF),
+                        reset_every=3000, refine_every=100, grow_grad2d=_GG)
+print(f"[pano-gsplat-sph] densify: grow_grad2d={_GG} refine_stop={int(ITERS*_RSF)}")
 strat.check_sanity(splats, opt); state = strat.initialize_state(scene_scale=extent)
 
 def load_cam(c):

@@ -14,3 +14,5 @@ p5_sr/weights/
 p5_sr/spatial_media/
 p5_sr/out/
 p5_sr/sr_methods/vendor/
+p3_pano/_run_*.sh
+p3_pano/_run_pgo.sh

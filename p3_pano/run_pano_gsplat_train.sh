@@ -25,6 +25,8 @@ docker run --rm --gpus all --ipc=host --ulimit memlock=-1 --ulimit stack=6710886
   -e PYTHONPATH=/w/p3_pano/gsplat \
   -e GSPLAT_EQUIRECT_COMPILE="${GSPLAT_EQUIRECT_COMPILE:-0}" \
   -e GSPLAT_EQUIRECT_FUSED="${GSPLAT_EQUIRECT_FUSED:-1}" \
+  -e GROW_GRAD2D="${GROW_GRAD2D:-0.0002}" \
+  -e REFINE_STOP_FRAC="${REFINE_STOP_FRAC:-0.5}" \
   -v "$ROOT":/w -w /w $PT bash -c "
   pip install -q --no-deps ninja rich jaxtyping plyfile 2>&1 | tail -1
   if [ \"$SPH\" = \"sph\" ]; then

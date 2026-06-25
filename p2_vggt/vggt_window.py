@@ -134,22 +134,33 @@ try:
 except Exception as e:
     print(f"  [global_sim3 unavailable: {e}] -> sequential Umeyama")
 
-# ---- Pass 3: apply per-window Sim3, dedup cameras, accumulate conf-masked pts ----
+# ---- Pass 3: merge. VGGT_PGO=1 -> per-camera pose-graph BA (centrality-weighted,
+# fixes seam drift); else legacy first-window pick. Points: conf-masked, via Sim3.
 g_names, g_R, g_t, g_pts = [], [], [], []
-seen = set()
-for r, (s, R, t) in zip(raw, xforms):
-    names, extr, conf, pts, Cs = r["names"], r["extr"], r["conf"], r["pts"], r["centers"]
-    for i, n in enumerate(names):
-        if n in seen: continue
-        seen.add(n)
-        Rc = extr[i, :, :3]
-        Cg = s * (R @ Cs[i]) + t
-        Rcg = Rc @ R.T
-        g_names.append(n); g_R.append(Rcg); g_t.append(-Rcg @ Cg)
-    m = conf >= CONF
-    P = pts[m]
-    if P.shape[0]:
-        g_pts.append(s * (R @ P.T).T + t)
+if os.environ.get("VGGT_PGO", "0") == "1":
+    from global_pose_graph import optimize_pose_graph
+    pg_names, pg_R, pg_C = optimize_pose_graph(raw, xforms, verbose=True)
+    for n, Rg, Cg in zip(pg_names, pg_R, pg_C):
+        g_names.append(n); g_R.append(Rg); g_t.append(-Rg @ Cg)
+    for r, (s, R, t) in zip(raw, xforms):
+        P = r["pts"][r["conf"] >= CONF]
+        if P.shape[0]: g_pts.append(s * (R @ P.T).T + t)
+    print("[merge] per-camera pose-graph BA (VGGT_PGO=1)")
+else:
+    seen = set()
+    for r, (s, R, t) in zip(raw, xforms):
+        names, extr, conf, pts, Cs = r["names"], r["extr"], r["conf"], r["pts"], r["centers"]
+        for i, n in enumerate(names):
+            if n in seen: continue
+            seen.add(n)
+            Rc = extr[i, :, :3]
+            Cg = s * (R @ Cs[i]) + t
+            Rcg = Rc @ R.T
+            g_names.append(n); g_R.append(Rcg); g_t.append(-Rcg @ Cg)
+        m = conf >= CONF
+        P = pts[m]
+        if P.shape[0]:
+            g_pts.append(s * (R @ P.T).T + t)
 
 print(f"merged: {len(g_names)} cameras, {sum(p.shape[0] for p in g_pts)} raw points")
 np.savez(os.path.join(scene, "vggt_window_merged.npz"),

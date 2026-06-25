@@ -12,6 +12,7 @@ SCENE_REL=$(realpath --relative-to="$ROOT" "$SCENE_HOST")
 docker run --rm --gpus all --ipc=host --ulimit memlock=-1 --ulimit stack=67108864 --user 0:0 \
   -v "$ROOT":/workspace/gaussian-splatting \
   -v "$ROOT/p2_vggt/weights":/wcache:ro \
+  -e VGGT_PGO="${VGGT_PGO:-0}" \
   -w /workspace/gaussian-splatting/p2_vggt $PT bash -c "
   pip install -q --no-deps einops safetensors huggingface_hub 2>&1 | tail -1
   python vggt_window.py /workspace/gaussian-splatting/$SCENE_REL $WIN $OVL $CONF
