@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>Linear Sweep - watertown_canal</name>
+    <description>Two-Way Linear Sweep (Mode C).
+Start: 30.899500,120.499500
+End:   30.900800,120.501200
+Length: 217.5m | Offset: 12.0m | Altitudes: [8.0, 15.0] | Speed: 1.5m/s
+Generated: 2026-06-26T15:34:12.360935</description>
+    <Style id="path">
+      <LineStyle><color>ff00ffff</color><width>3</width></LineStyle>
+    </Style>
+    <Placemark>
+      <name>Sweep A @ 8.0m</name>
+      <styleUrl>#path</styleUrl>
+      <LineString>
+        <altitudeMode>relativeToGround</altitudeMode>
+        <tessellate>1</tessellate>
+        <coordinates>
+          120.4994164,30.8995805,8.0
+          120.5011164,30.9008805,8.0
+        </coordinates>
+      </LineString>
+    </Placemark>
+    <Placemark>
+      <name>Sweep B @ 8.0m</name>
+      <styleUrl>#path</styleUrl>
+      <LineString>
+        <altitudeMode>relativeToGround</altitudeMode>
+        <tessellate>1</tessellate>
+        <coordinates>
+          120.5012836,30.9007195,8.0
+          120.4995836,30.8994195,8.0
+        </coordinates>
+      </LineString>
+    </Placemark>
+    <Placemark>
+      <name>Sweep A @ 15.0m</name>
+      <styleUrl>#path</styleUrl>
+      <LineString>
+        <altitudeMode>relativeToGround</altitudeMode>
+        <tessellate>1</tessellate>
+        <coordinates>
+          120.4994164,30.8995805,15.0
+          120.5011164,30.9008805,15.0
+        </coordinates>
+      </LineString>
+    </Placemark>
+    <Placemark>
+      <name>Sweep B @ 15.0m</name>
+      <styleUrl>#path</styleUrl>
+      <LineString>
+        <altitudeMode>relativeToGround</altitudeMode>
+        <tessellate>1</tessellate>
+        <coordinates>
+          120.5012836,30.9007195,15.0
+          120.4995836,30.8994195,15.0
+        </coordinates>
+      </LineString>
+    </Placemark>
+  </Document>
+</kml>
