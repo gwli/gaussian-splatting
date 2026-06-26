@@ -212,6 +212,75 @@ def gen_linear(args):
     print(f'  Est. flight time: {est_time:.1f} min')
 
 
+def compute_plan(D, pano_w=7680, eff=2.0, shutter=500, tri_deg=12.0,
+                 capture_fps=30.0, max_speed=5.0):
+    """Physics-based capture parameters for 360 3DGS (see FLIGHT_PLANNING.md §quant).
+      D        : target distance to subject (m)
+      pano_w   : equirect width px (8K=7680)
+      eff      : effective-resolution divisor (real lens+stitch ~2x worse than nominal)
+      shutter  : 1/shutter s exposure
+      tri_deg  : target triangulation angle (deg) -> sets baseline B=tan(tri)*D
+    Returns dict of derived params."""
+    ifov = (2 * math.pi / pano_w) * eff               # rad/px effective
+    gsd_cm = D * ifov * 100.0                          # cm/px on subject
+    B = math.tan(math.radians(tri_deg)) * D            # keyframe baseline (m)
+    t_exp = 1.0 / shutter
+    v_blur = D * ifov / t_exp                          # max speed for <1px blur
+    v = min(v_blur, max_speed)                         # recommended cruise speed
+    kf_fps = v / B                                     # keyframe extraction rate
+    line_spacing = round(B, 1)                         # cross-track parallax ~ baseline
+    alt_low = round(D, 0)                              # grid altitude AGL ~ standoff
+    alt_high = round(D * 1.5, 0)                       # 2nd layer for Z parallax
+    return dict(ifov_mrad=ifov * 1000, gsd_cm=gsd_cm, baseline_m=round(B, 2),
+                v_blur=round(v_blur, 1), speed=round(v, 1), kf_fps=round(kf_fps, 2),
+                line_spacing=line_spacing, altitudes=[alt_low, alt_high],
+                tri_deg=tri_deg, D=D, capture_fps=capture_fps)
+
+
+def gen_plan(args):
+    """Compute physics-based params from a target distance, then emit a grid plan."""
+    p = compute_plan(args.subject_dist, args.pano_width, args.eff, args.shutter,
+                     args.tri_deg, max_speed=args.max_speed)
+    print("==== computed capture parameters (360 3DGS) ====")
+    print(f"  subject distance D     : {p['D']} m")
+    print(f"  effective IFOV         : {p['ifov_mrad']:.2f} mrad/px")
+    print(f"  GSD (detail on subject): {p['gsd_cm']:.1f} cm/px"
+          f"   {'[OK <2cm]' if p['gsd_cm']<=2 else '[coarse — fly closer for detail]'}")
+    print(f"  triangulation target   : {p['tri_deg']}°  -> keyframe baseline B = {p['baseline_m']} m  (B/D={p['baseline_m']/p['D']:.2f})")
+    print(f"  max speed (blur<1px)   : {p['v_blur']} m/s @ 1/{args.shutter}s  -> cruise {p['speed']} m/s")
+    print(f"  keyframe extraction    : {p['kf_fps']} fps  (capture at {p['capture_fps']:.0f}fps, keep ~every {p['baseline_m']}m)")
+    print(f"  grid line spacing      : {p['line_spacing']} m   altitudes(AGL): {p['altitudes']} m")
+    print(f"  RULE: every point needs >=3 views with B/D 0.1-0.3 in TWO axes + loop closure")
+    print("================================================")
+    # emit a 2-altitude grid with the computed spacing/speed
+    center_lat, center_lon = args.center
+    w_m, h_m = args.size
+    spacing = p['line_spacing']
+    altitudes = p['altitudes']
+    n_rows = max(2, int(h_m / spacing) + 1)
+    layers, csv_rows = [], []
+    for alt in altitudes:
+        coords = []
+        for row in range(n_rows):
+            y = -h_m / 2 + row * spacing
+            x0, x1 = (-w_m/2, w_m/2) if row % 2 == 0 else (w_m/2, -w_m/2)
+            for tag, x in (('start', x0), ('end', x1)):
+                lat, lon = meters_to_latlon(center_lat, center_lon, x, y)
+                coords.append((lon, lat, alt))
+                csv_rows.append([f'L{alt}m', f'row{row}_{tag}', round(lat, 7), round(lon, 7), alt, p['speed']])
+        layers.append((f'Grid @ {alt}m AGL (D={p["D"]}m)', coords))
+    desc = (f'Physics-planned grid for 360 3DGS.\n'
+            f'D={p["D"]}m GSD={p["gsd_cm"]:.1f}cm/px B={p["baseline_m"]}m tri={p["tri_deg"]}deg\n'
+            f'spacing={spacing}m alts={altitudes}m speed={p["speed"]}m/s keyframe={p["kf_fps"]}fps\n'
+            f'Generated: {datetime.now().isoformat()}')
+    write_kml(f'{args.output}.kml', f'Planned Grid - {args.output}', desc, layers)
+    write_csv(f'{args.output}.csv', ['layer', 'waypoint', 'lat', 'lon', 'alt_m', 'speed_mps'], csv_rows)
+    total = sum(n_rows * w_m + (n_rows - 1) * spacing for _ in altitudes)
+    print(f'Generated {args.output}.kml / .csv | {len(altitudes)}x{n_rows} rows, '
+          f'{len(csv_rows)} wpts | est {total/p["speed"]/60:.1f} min, '
+          f'~{int(total/p["speed"]*p["kf_fps"])} keyframes')
+
+
 def parse_coords(s):
     """Parse 'lat,lon' string."""
     parts = s.split(',')
@@ -248,6 +317,17 @@ def main():
     pb.add_argument('--speed', type=float, default=2.5)
     pb.add_argument('--output', default='grid')
 
+    pp = sub.add_parser('plan', help='Compute physics-based params from subject distance, emit grid')
+    pp.add_argument('--center', type=parse_coords, required=True, help='lat,lon')
+    pp.add_argument('--size', type=parse_size, required=True, help='WxH meters')
+    pp.add_argument('--subject-dist', type=float, default=25, help='target distance to subject (m)')
+    pp.add_argument('--tri-deg', type=float, default=12, help='target triangulation angle (deg)')
+    pp.add_argument('--shutter', type=float, default=500, help='1/shutter s')
+    pp.add_argument('--pano-width', type=float, default=7680, help='equirect width px (8K=7680)')
+    pp.add_argument('--eff', type=float, default=2.0, help='effective-resolution divisor')
+    pp.add_argument('--max-speed', type=float, default=5.0, help='speed cap m/s')
+    pp.add_argument('--output', default='planned')
+
     pc = sub.add_parser('linear', help='Mode C: linear two-way sweep')
     pc.add_argument('--start', type=parse_coords, required=True, help='lat,lon')
     pc.add_argument('--end', type=parse_coords, required=True, help='lat,lon')
@@ -264,6 +344,8 @@ def main():
         gen_grid(args)
     elif args.mode == 'linear':
         gen_linear(args)
+    elif args.mode == 'plan':
+        gen_plan(args)
 
 
 if __name__ == '__main__':
