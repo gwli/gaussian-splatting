@@ -114,12 +114,33 @@ UniSHARP 在我们这批航拍全景上"能用但不保真",根因是它的 UniK
 
 ---
 
-## 6. 训练档(A 档,下一步,本次不实现)
-1. 写 `WatertownPanoDataset` ≈ `SimPanorama` 薄封装(读上面布局);或直接复用
-   `SimPanorama(root=ft/data, pose_root=ft/poses, far_depth_invalid_m=150,
-   pair_max_translation_m=8)`。
-2. 在 `unified_trainer` 里冻结除两个 head 外的参数,光度+感知+伪深度尺度锚。
-3. 留出帧(每场景尾 20%)做验证。
+## 6. A 档训练(已落地并跑通)
+`train_a.py`(launcher)+ `train_a.sh`(wrapper)驱动**现成 CLI**,无需另写 trainer。
+直接复用 `SimPanorama`(我们的数据布局就是按它造的)。
+```
+bash p6_unisharp/ft/train_a.sh 027              # STEPS/LR0/UNIK3D_LR0/... 见脚本头
+```
+**关键:stock CLI 没有 resume,且训练分支的 UniK3D 离线加载有 bug**。launcher 用三处
+干净 monkeypatch 解决(不改 gitignore 的 clone):
+1. **加载预训练权重**:模型构造后 `load_from_checkpoint(INIT_CKPT, strict=False)`
+   → 实测 `missing=0 unexpected=1`,确是**从预训练微调**而非从零;
+2. **离线 UniK3D**:adapter 的 `UniK3DHub(config_variant="eval")` 在官方 clone 上必抛
+   TypeError 且 offline 时拒绝回退 → patch `unik3d_adapter.load_unik3d_model` 直接走
+   `UniK3D.from_pretrained`(缓存,离线);
+3. **配对/尺度**:SimPanorama 写死 `pair_max_translation_m=0.5`、`position_scale=0.01`
+   (室内默认)→ 经 env 改 `SIM_PAIR_MAX_TR=6`、`SIM_PAIR_MIN_OVERLAP=0.1`、
+   **`position_scale=1.0`**(否则米制位移被缩 100×、与米制伪深度单位不一致 → 0 对)。
+
+**冻结策略**(纯靠 CLI 分组 LR,无需 patch):`--unik3d-encoder-lr0/1 0` 冻 DINOv2 编码器;
+`--unik3d-lr0/1 1e-5` 轻调 UniK3D 解码器+深度头(**即"微调深度先验"**);`--lr0 1e-4` 训 heads。
+
+**冒烟实测(027,8 步)**:`dataset=sim` 采到对、loss 9.0–9.8 无 NaN、tgt(新视角)loss≈2.7、
+~1.1s/步(gsplat 扩展首次编译 ~187s)。✅ 端到端可训。
+
+### 待办(下一步执行)
+- [ ] 留出帧:把每场景尾 20% 拆成 `scene_NNNhf_val` 单独 manifest 做评测;
+- [ ] 正式训练(~2k–5k 步)+ 对比微调前/后留出帧 **PSNR/LPIPS**;
+- [ ] 深度直方图应从"~100m 轨道"展开到更合理的室外分层。
 
 ### 验收(微调档)
 - [ ] 留出帧新视角 **PSNR/LPIPS** 微调后优于微调前;
