@@ -23,3 +23,7 @@ p6_unisharp/.hf/
 p6_unisharp/.torch/
 p6_unisharp/*.log
 p6_unisharp/UniSHARP/outputs/
+p6_unisharp/ft/data/
+p6_unisharp/ft/poses/
+p6_unisharp/ft/pairs/
+p6_unisharp/ft/_viz/
