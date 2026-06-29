@@ -28,12 +28,13 @@ for S in $SCENES; do
   echo "######################## $SC (pos_scale=$POS_SCALE) ########################"
 
   echo ">> [1/3] de-rotate + pose csv"
+  GL=""; [ "${GRAVITY:-0}" = "1" ] && GL="--gravity-level"
   DRUN "python /w/p6_unisharp/ft/derotate_and_pose.py \
     --cams /w/p3_pano/pano_cams_${SC}.json \
     --panodir /w/data/8kpano/scenes/${SC}_pano/panoramas \
     --out-rgb /w/p6_unisharp/ft/data/${SC} \
     --out-pose /w/p6_unisharp/ft/poses/${SC}.csv \
-    --pos-scale $POS_SCALE"
+    --pos-scale $POS_SCALE $GL"
 
   echo ">> [2/3] pseudo depth (UniK3D vitl, needs venv from run_unisharp.sh)"
   DRUN "if [ ! -f $VENV/.ready ]; then echo '[ERR] venv missing — run p6_unisharp/run_unisharp.sh once first'; exit 3; fi

@@ -92,12 +92,19 @@ UniSHARP 在我们这批航拍全景上"能用但不保真",根因是它的 UniK
 - [⚠] 但 **valid 跨帧 0.11–0.98、med 3.3–287m 抖动大** → UniK3D 在此 OOD 序列不稳
       (正是微调要修的);A 档靠光度兜底、伪深度仅弱锚。
 
-### 5.2 重力对齐(目视新发现 → B 档 TODO)
-去旋转后地平线呈**正弦波**,说明 canonical 帧对齐到的是 **VGGT 世界系,而非重力垂直**
-(VGGT 系不水平 + 无人机横滚)。影响:跨帧一致 → 纯平移契约成立(**A 档可用**);
-但 UniSHARP 训练在**正立 ERP**,倾斜 ERP 是额外一层 OOD。
-**B 档改进**:在 `derotate_and_pose.py` 加重力校平——拟合地平线正弦相位/幅度估出"上"向量,
-左乘一个全局 `R_level` 把所有帧拉正(全局同一旋转,不破坏帧间纯平移关系)。
+### 5.2 重力对齐(B 档,已实现)
+去旋转后地平线呈正弦波 → canonical 帧对齐到 **VGGT 世界系而非重力垂直**(VGGT 系不水平
++ 无人机横滚)。UniSHARP 训练在**正立 ERP**,倾斜 ERP 是额外 OOD。
+`derotate_and_pose.py --gravity-level` 已加重力校平,左乘全局 `R_level`(同一旋转,不破坏
+帧间纯平移),两种估"上"法:
+- **`--level-method horizon`(默认,推荐)**:把每帧 sky/ground 边界拟合到倾斜大圆
+  `sin(lon)nx+tan(lat)ny+cos(lon)nz=0`(齐次 LS),pano 系法向 →`R_wp^T`→ 世界"上",多帧平均。
+- `--level-method trajectory`:相机轨迹 PCA 最小轴;**仅平飞有效,banked footage 失败**
+  (实测 027 给出 ≈+Y 的错误估计,地平线没拉平)。
+
+**实测(027)**:horizon 法 12 帧一致性 `spread=0.005`,修正 ~8°,亮带从"骑在赤道上方/斜穿"
+变为**对称居中于赤道**。残留弯曲是高空斜俯视的真实几何(远景在 ERP 本就弯),非全局旋转可消。
+B 档重建数据:`GRAVITY=1 bash build_ft_dataset.sh 027`(rgb 旋转后伪深度需一并重算)。
 
 ### 5.1 冒烟实测发现(027,2 帧)——两个真实结论
 1. **伪深度严重 OOD**:UniK3D 把整景压在 **56–150m**(med 84–134m),且 far=150 截断后
