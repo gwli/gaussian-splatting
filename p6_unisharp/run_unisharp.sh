@@ -12,6 +12,8 @@ mkdir -p "$ROOT/p6_unisharp/.pipcache"; chmod -R 777 "$ROOT/p6_unisharp" 2>/dev/
 docker run --rm --gpus all --ipc=host --ulimit memlock=-1 --ulimit stack=67108864 --user 0:0 \
   -e PIP_CACHE_DIR=/w/p6_unisharp/.pipcache -e HF_HOME=/w/p6_unisharp/.hf \
   -e TORCH_HOME=/w/p6_unisharp/.torch -e TORCH_CUDA_ARCH_LIST=9.0 \
+  -e UNI_FORWARD_M="${UNI_FORWARD_M:-0.2}" -e UNI_ROTATE_M="${UNI_ROTATE_M:-0.1}" \
+  -e UNI_FWD_FRAC="${UNI_FWD_FRAC:-0.04}" -e UNI_ROT_FRAC="${UNI_ROT_FRAC:-0.02}" \
   -v "$ROOT":/w -w /w/p6_unisharp/UniSHARP $PT bash -c '
   set -e
   VENV=/w/p6_unisharp/venv

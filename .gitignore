@@ -22,3 +22,4 @@ p6_unisharp/.pipcache/
 p6_unisharp/.hf/
 p6_unisharp/.torch/
 p6_unisharp/*.log
+p6_unisharp/UniSHARP/outputs/
