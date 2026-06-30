@@ -14,10 +14,14 @@ STEPS="${STEPS:-30}"; BATCH="${BATCH:-2}"; LR0="${LR0:-1e-4}"; LR1="${LR1:-1e-5}
 UNIK3D_LR0="${UNIK3D_LR0:-1e-5}"; UNIK3D_LR1="${UNIK3D_LR1:-1e-6}"
 SIM_PAIR_MAX_TR="${SIM_PAIR_MAX_TR:-6.0}"; SIM_PAIR_MIN_OVERLAP="${SIM_PAIR_MIN_OVERLAP:-0.1}"
 FAR="${FAR:-300}"; CKPT="${CKPT:-weights/pretained_model.pt}"
+ENC_LR0="${ENC_LR0:-0}"; ENC_LR1="${ENC_LR1:-0}"   # >0 unfreezes UniK3D encoder (B-tier)
+# MANIFEST_SCENES (newline/space-separated) trains on several scenes; SC names the run dir.
+MANIFEST_SCENES="${MANIFEST_SCENES:-$SC}"
 
 [ -d "$FT/data/$SC" ] || { echo "no dataset $FT/data/$SC — run build_ft_dataset.sh $S first"; exit 2; }
 mkdir -p "$FT/manifests" "$FT/runs"
-echo "$SC" > "$FT/manifests/sim_train_scenes.txt"
+printf '%s\n' $MANIFEST_SCENES > "$FT/manifests/sim_train_scenes.txt"
+echo ">> train scenes: $(tr '\n' ' ' < $FT/manifests/sim_train_scenes.txt)"
 : > "$FT/manifests/_wild_roots_dummy.txt"      # dummy file for --wild-roots-file (exists=True)
 chmod -R 777 "$FT" 2>/dev/null || true
 
@@ -40,7 +44,7 @@ docker run --rm --gpus all --ipc=host --ulimit memlock=-1 --ulimit stack=6710886
     --log-every ${LOG_EVERY:-1} --vis-every ${VIS_EVERY:-0} --save-every ${SAVE_EVERY:-0} \
     --lr0 $LR0 --lr1 $LR1 \
     --unik3d-lr0 $UNIK3D_LR0 --unik3d-lr1 $UNIK3D_LR1 \
-    --unik3d-encoder-lr0 0 --unik3d-encoder-lr1 0 \
+    --unik3d-encoder-lr0 $ENC_LR0 --unik3d-encoder-lr1 $ENC_LR1 \
     --lambda-depth 0.1 \
     --dataset-weight-sim 1 --dataset-weight-re10k 0 --dataset-weight-hm3d 0 \
     --dataset-weight-wildrgbd 0 --dataset-weight-dl3dv 0 --dataset-weight-scanetpp 0 \
