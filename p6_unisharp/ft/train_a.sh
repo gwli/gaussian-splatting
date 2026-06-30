@@ -9,7 +9,7 @@ set -u
 ROOT=/raid/git/gaussian-splatting
 FT=$ROOT/p6_unisharp/ft; US=$ROOT/p6_unisharp/UniSHARP
 PT=nvcr.io/nvidia/pytorch:24.12-py3
-S="${1:-027}"; SC=scene_${S}hf
+S="${1:-027}"; SC="${SC_NAME:-scene_${S}hf}"   # SC_NAME overrides (e.g. scene_023hf_train)
 STEPS="${STEPS:-30}"; BATCH="${BATCH:-2}"; LR0="${LR0:-1e-4}"; LR1="${LR1:-1e-5}"
 UNIK3D_LR0="${UNIK3D_LR0:-1e-5}"; UNIK3D_LR1="${UNIK3D_LR1:-1e-6}"
 SIM_PAIR_MAX_TR="${SIM_PAIR_MAX_TR:-6.0}"; SIM_PAIR_MIN_OVERLAP="${SIM_PAIR_MIN_OVERLAP:-0.1}"
