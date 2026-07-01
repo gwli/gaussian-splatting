@@ -31,3 +31,6 @@ p6_unisharp/ft/runs/
 p6_unisharp/ft/manifests/
 p6_unisharp/ft/*.log
 p6_unisharp/vda/
+p6_unisharp/la/
+p6_unisharp/exiftool/
+p6_unisharp/prx_probe/
