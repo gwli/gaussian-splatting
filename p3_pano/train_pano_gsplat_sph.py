@@ -137,6 +137,11 @@ for step in range(ITERS):
     if POSE_OPT:
         if step >= POSE_START: pose_opt.step()
         pose_opt.zero_grad(set_to_none=True)
+        if os.environ.get("POSE_GAUGE", "0") == "1" and step >= POSE_START:
+            with torch.no_grad():  # gauge fix: zero-mean deltas over train cams
+                ti = torch.tensor([c["i"] for c in train], device=dev)
+                pose_dt.data[ti] -= pose_dt.data[ti].mean(0)
+                pose_dr.data[ti] -= pose_dr.data[ti].mean(0)
     strat.step_post_backward(params=splats, optimizers=opt, state=state, step=step, info=info, packed=False)
     ema = loss.item() if ema is None else 0.9 * ema + 0.1 * loss.item()
     if step % 500 == 0 or step == ITERS - 1:
