@@ -61,23 +61,53 @@ strat = DefaultStrategy(verbose=False, refine_stop_iter=int(ITERS * _RSF),
 print(f"[pano-gsplat-sph] densify: grow_grad2d={_GG} refine_stop={int(ITERS*_RSF)}")
 strat.check_sanity(splats, opt); state = strat.initialize_state(scene_scale=extent)
 
-def load_cam(c):
+def load_cam(c, i):
     R = np.array(c["R_wp"], np.float32); T = np.array(c["T"], np.float32)
     vm = np.eye(4, dtype=np.float32); vm[:3, :3] = R; vm[:3, 3] = T
     im = Image.open(c["image"]).convert("RGB").resize((W, H), Image.LANCZOS)
     gt = torch.tensor(np.asarray(im), dtype=torch.float32, device=dev).permute(2, 0, 1) / 255.0
     return {"vm": torch.tensor(vm, device=dev), "C": torch.tensor(np.array(c["C"], np.float32), device=dev),
+            "R": torch.tensor(R, device=dev), "i": i,
             "gt": gt, "name": f"pano_{c['idx']:04d}"}
 
-cams = [load_cam(c) for c in meta["cameras"]]
+cams = [load_cam(c, i) for i, c in enumerate(meta["cameras"])]
 test = cams[::8]; train = [c for i, c in enumerate(cams) if i % 8 != 0]
 print(f"[pano-gsplat-sph] {len(cams)} cams -> {len(train)} train / {len(test)} test")
 
-def render(cam, sh_deg):
+# optional in-training pose refinement (BA): POSE_OPT=1 -> per-camera so3
+# rotation delta (pano frame, left-mul) + metric translation delta on C.
+POSE_OPT = os.environ.get("POSE_OPT", "0") == "1"
+POSE_START = int(os.environ.get("POSE_START", "500"))
+pose_dr = torch.zeros(len(cams), 3, device=dev, requires_grad=POSE_OPT)
+pose_dt = torch.zeros(len(cams), 3, device=dev, requires_grad=POSE_OPT)
+pose_opt = torch.optim.Adam([
+    {"params": [pose_dr], "lr": float(os.environ.get("POSE_LR_R", "1e-3"))},
+    {"params": [pose_dt], "lr": float(os.environ.get("POSE_LR_T", "3e-2"))}]) if POSE_OPT else None
+if POSE_OPT:
+    print(f"[pose-opt] ON start={POSE_START} lr_r={os.environ.get('POSE_LR_R','1e-3')} lr_t={os.environ.get('POSE_LR_T','3e-2')}")
+
+def so3exp(w):
+    th = w.norm() + 1e-12; k = w / th
+    z = torch.zeros((), device=w.device)
+    K = torch.stack([torch.stack([z, -k[2], k[1]]),
+                     torch.stack([k[2], z, -k[0]]),
+                     torch.stack([-k[1], k[0], z])])
+    return torch.eye(3, device=w.device) + torch.sin(th) * K + (1 - torch.cos(th)) * (K @ K)
+
+def render(cam, sh_deg, use_pose=True):
     colors = torch.cat([splats["sh0"], splats["shN"]], 1)
-    img, info = _render_fn(splats["means"], splats["quats"], torch.exp(splats["scales"]),
-                           torch.sigmoid(splats["opacities"]), colors, cam["vm"], cam["C"],
-                           W, H, sh_deg)
+    if POSE_OPT and use_pose:
+        i = cam["i"]
+        Rp = so3exp(pose_dr[i]) @ cam["R"]
+        Cp = cam["C"] + pose_dt[i]
+        vm = torch.cat([torch.cat([Rp, -(Rp @ Cp)[:, None]], 1),
+                        torch.tensor([[0, 0, 0, 1.0]], device=dev)], 0)
+        img, info = _render_fn(splats["means"], splats["quats"], torch.exp(splats["scales"]),
+                               torch.sigmoid(splats["opacities"]), colors, vm, Cp, W, H, sh_deg)
+    else:
+        img, info = _render_fn(splats["means"], splats["quats"], torch.exp(splats["scales"]),
+                               torch.sigmoid(splats["opacities"]), colors, cam["vm"], cam["C"],
+                               W, H, sh_deg)
     return img.permute(2, 0, 1).clamp(0, 1), info     # (3,H,W)
 
 def ssim(a, b):
@@ -98,8 +128,15 @@ for step in range(ITERS):
     strat.step_pre_backward(params=splats, optimizers=opt, state=state, step=step, info=info)
     gt = cam["gt"]
     loss = 0.8 * (img - gt).abs().mean() + 0.2 * (1.0 - ssim(img[None], gt[None]))
+    if POSE_OPT:  # anchor deltas to the GPS/IMU prior (sigma_r~2deg, sigma_t~2m)
+        i = cam["i"]
+        loss = loss + float(os.environ.get("POSE_REG", "0.01")) * (
+            (pose_dr[i] / 0.035).square().sum() + (pose_dt[i] / 2.0).square().sum())
     loss.backward()
     for o in opt.values(): o.step(); o.zero_grad(set_to_none=True)
+    if POSE_OPT:
+        if step >= POSE_START: pose_opt.step()
+        pose_opt.zero_grad(set_to_none=True)
     strat.step_post_backward(params=splats, optimizers=opt, state=state, step=step, info=info, packed=False)
     ema = loss.item() if ema is None else 0.9 * ema + 0.1 * loss.item()
     if step % 500 == 0 or step == ITERS - 1:

@@ -27,6 +27,8 @@ docker run --rm --gpus all --ipc=host --ulimit memlock=-1 --ulimit stack=6710886
   -e GSPLAT_EQUIRECT_FUSED="${GSPLAT_EQUIRECT_FUSED:-1}" \
   -e GROW_GRAD2D="${GROW_GRAD2D:-0.0002}" \
   -e REFINE_STOP_FRAC="${REFINE_STOP_FRAC:-0.5}" \
+  -e POSE_OPT="${POSE_OPT:-0}" -e POSE_START="${POSE_START:-500}" \
+  -e POSE_LR_R="${POSE_LR_R:-1e-3}" -e POSE_LR_T="${POSE_LR_T:-3e-2}" \
   -v "$ROOT":/w -w /w $PT bash -c "
   pip install -q --no-deps ninja rich jaxtyping plyfile 2>&1 | tail -1
   if [ \"$SPH\" = \"sph\" ]; then
