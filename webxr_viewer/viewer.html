@@ -71,13 +71,13 @@
     <a href="?ply=/data/8kpano/scenes/gps_027.ksplat" style="background:rgba(90,200,255,0.35)">027</a>
     <a href="?ply=/data/8kpano/scenes/gps_028.ksplat" style="background:rgba(90,200,255,0.35)">028</a>
     <span style="color:#888;margin-left:10px">Dense (1140):</span>
-    <a href="?ply=/data/8kpano/scenes/gps_021dense.ksplat" style="background:rgba(90,255,200,0.45)">021</a>
-    <a href="?ply=/data/8kpano/scenes/gps_022dense.ksplat" style="background:rgba(90,255,200,0.45)">022</a>
-    <a href="?ply=/data/8kpano/scenes/gps_023dense.ksplat" style="background:rgba(90,255,200,0.45)">023</a>
-    <a href="?ply=/data/8kpano/scenes/gps_025dense.ksplat" style="background:rgba(90,255,200,0.45)">025</a>
-    <a href="?ply=/data/8kpano/scenes/gps_026dense.ksplat" style="background:rgba(90,255,200,0.45)">026</a>
-    <a href="?ply=/data/8kpano/scenes/gps_027dense.ksplat" style="background:rgba(90,255,200,0.45)">027</a>
-    <a href="?ply=/data/8kpano/scenes/gps_028dense.ksplat" style="background:rgba(90,255,200,0.45)">028</a>
+    <a href="?ply=/data/8kpano/scenes/gps_021dense.ksplat&cam=4,33,2&look=4,0,60&up=0,1,0" style="background:rgba(90,255,200,0.45)">021</a>
+    <a href="?ply=/data/8kpano/scenes/gps_022dense.ksplat&cam=4,33,2&look=4,0,60&up=0,1,0" style="background:rgba(90,255,200,0.45)">022</a>
+    <a href="?ply=/data/8kpano/scenes/gps_023dense.ksplat&cam=4,33,2&look=4,0,60&up=0,1,0" style="background:rgba(90,255,200,0.45)">023</a>
+    <a href="?ply=/data/8kpano/scenes/gps_025dense.ksplat&cam=4,33,2&look=4,0,60&up=0,1,0" style="background:rgba(90,255,200,0.45)">025</a>
+    <a href="?ply=/data/8kpano/scenes/gps_026dense.ksplat&cam=4,33,2&look=4,0,60&up=0,1,0" style="background:rgba(90,255,200,0.45)">026</a>
+    <a href="?ply=/data/8kpano/scenes/gps_027dense.ksplat&cam=4,33,2&look=4,0,60&up=0,1,0" style="background:rgba(90,255,200,0.45)">027</a>
+    <a href="?ply=/data/8kpano/scenes/gps_028dense.ksplat&cam=4,33,2&look=4,0,60&up=0,1,0" style="background:rgba(90,255,200,0.45)">028</a>
     <span style="color:#888;margin-left:10px">Source:</span>
     <a href="#" id="srcColmap">COLMAP</a>
     <a href="#" id="srcVggt">VGGT</a>
@@ -158,10 +158,11 @@
     log(`Loading scene=${scene}`);
 
     try {
+      const _v3 = (k, d) => (params.get(k) ? params.get(k).split(',').map(Number) : d);
       const viewer = new GaussianSplats3D.Viewer({
-        'cameraUp': [0, -1, 0],
-        'initialCameraPosition': [0, 0, 3],
-        'initialCameraLookAt': [0, 0, 0],
+        'cameraUp': _v3('up', [0, -1, 0]),
+        'initialCameraPosition': _v3('cam', [0, 0, 3]),
+        'initialCameraLookAt': _v3('look', [0, 0, 0]),
         'webXRMode': GaussianSplats3D.WebXRMode.VR,
         'sharedMemoryForWorkers': false,
         'gpuAcceleratedSort': true,
