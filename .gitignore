@@ -38,3 +38,5 @@ p6_unisharp/telemetry-parser/
 p3_pano/gps_init_*.ply
 p6_unisharp/lbmap/
 p6_unisharp/colmap023/
+data/8kpano/scenes/fish023/
+data/8kpano/scenes/scene_023cal_pano/
