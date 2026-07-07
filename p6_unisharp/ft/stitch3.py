@@ -11,8 +11,8 @@ ROOT = "/w"; dev = "cuda" if torch.cuda.is_available() else "cpu"
 z = np.load(f"{ROOT}/p3_pano/rig023.npz")
 R_rig = torch.tensor(z["R_rig"], dtype=torch.float32, device=dev)
 cal_d, cal_u = z["cal_d"], z["cal_u"]
-DOWN = f"{ROOT}/data/8kpano/scenes/fish023/images"
-UP = f"{ROOT}/data/8kpano/scenes/fish023/images_up"
+DOWN = os.environ.get("FISH_DOWN", f"{ROOT}/data/8kpano/scenes/fish023/images")
+UP = os.environ.get("FISH_UP", f"{ROOT}/data/8kpano/scenes/fish023/images_up")
 TH_MAX = math.radians(100.0)
 H, W = 2048, 4096
 outdir = sys.argv[1]; N = int(sys.argv[2]) if len(sys.argv) > 2 else 240
@@ -27,15 +27,18 @@ R_e2c = torch.tensor([[1,0,0],[0,0,-1],[0,1,0]], dtype=torch.float32, device=dev
 d_dn = torch.einsum("ij,hwj->hwi", R_e2c, d_erp)
 d_up = torch.einsum("ij,hwj->hwi", R_rig, d_dn)
 
+FW = int(os.environ.get("FISH_W", "1920"))  # fisheye input resolution; calib is at 1920
 def proj(d, cal):
     fx, fy, cx, cy, k1, k2, k3, k4 = cal
+    sc = FW / 1920.0
+    fx, fy, cx, cy = fx*sc, fy*sc, cx*sc, cy*sc  # k1..k4 are scale-invariant
     x, y, zc = d[..., 0], d[..., 1], d[..., 2]
     hyp = torch.sqrt(x*x + y*y).clamp(min=1e-9)
     th = torch.atan2(hyp, zc)
     t2 = th*th
     r = th*(1 + k1*t2 + k2*t2**2 + k3*t2**3 + k4*t2**4)
     u = fx*r*x/hyp + cx; v = fy*r*y/hyp + cy
-    gx = u/(1920-1)*2 - 1; gy = v/(1920-1)*2 - 1
+    gx = u/(FW-1)*2 - 1; gy = v/(FW-1)*2 - 1
     return torch.stack([gx, gy], -1), th
 
 gd, thd = proj(d_dn, cal_d)
