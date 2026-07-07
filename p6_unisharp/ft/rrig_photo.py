@@ -51,11 +51,18 @@ for gdeg in range(0,360,3):
 print(f"coarse: corr={best[0]:.3f} g={best[1]}")
 b0=best
 for gdeg in np.arange(b0[1]-4,b0[1]+4.1,1.0):
-    for a in np.arange(-3,3.1,1.0):
-        for bb in np.arange(-3,3.1,1.0):
+    for a in np.arange(-12,12.1,2.0):
+        for bb in np.arange(-12,12.1,2.0):
             s=score(R3(math.radians(gdeg),math.radians(a),math.radians(bb)))
             if s>best[0]: best=(s,gdeg,a,bb)
 print(f"fine: corr={best[0]:.3f} g={best[1]:.1f} a={best[2]:.1f} b={best[3]:.1f}")
+b1=best
+for gdeg in np.arange(b1[1]-1,b1[1]+1.01,0.5):
+    for a in np.arange(b1[2]-2,b1[2]+2.01,0.5):
+        for bb in np.arange(b1[3]-2,b1[3]+2.01,0.5):
+            s=score(R3(math.radians(gdeg),math.radians(a),math.radians(bb)))
+            if s>best[0]: best=(s,gdeg,a,bb)
+print(f"ultra: corr={best[0]:.3f} g={best[1]:.2f} a={best[2]:.2f} b={best[3]:.2f}")
 Rr=R3(math.radians(best[1]),math.radians(best[2]),math.radians(best[3])).cpu().numpy()
 np.savez(f"{ROOT}/p3_pano/rig023.npz",R_rig=Rr,cal_d=cal_d,cal_u=cal_u)
 print("rig023.npz updated (photometric R_rig)")

@@ -43,6 +43,7 @@ gu, thu = proj(d_up, cal_u)
 wd = ((TH_MAX-thd)/0.18).clamp(0, 1) * (thd < TH_MAX)
 wu = ((TH_MAX-thu)/0.18).clamp(0, 1) * (thu < TH_MAX)
 s = (wd+wu).clamp(min=1e-6)
+olap = (wd > 0.05) & (wu > 0.05)  # ring where both lenses see the scene
 
 def load(p):
     return torch.from_numpy(np.asarray(Image.open(p).convert("RGB"), np.float32)).permute(2,0,1)[None].to(dev)/255
@@ -50,6 +51,9 @@ def load(p):
 for k in range(1, N+1):
     a = Fn.grid_sample(load(f"{DOWN}/f_{k:04d}.jpg"), gd[None], mode="bilinear", padding_mode="zeros", align_corners=True)[0]
     b = Fn.grid_sample(load(f"{UP}/f_{k:04d}.jpg"), gu[None], mode="bilinear", padding_mode="zeros", align_corners=True)[0]
+    # per-frame AE gain compensation: match up-lens to down-lens in the overlap ring
+    gain = (a[:, olap].mean(1) / b[:, olap].mean(1).clamp(min=1e-4)).clamp(0.5, 2.0)
+    b = (b * gain[:, None, None]).clamp(0, 1)
     out = (a*wd + b*wu)/s
     Image.fromarray((out.permute(1,2,0).clamp(0,1)*255).byte().cpu().numpy()).save(f"{outdir}/pano_{k:04d}.jpg", quality=92)
     if k % 80 == 0: print(k, flush=True)
