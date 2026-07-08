@@ -2,7 +2,8 @@
 """Dense (1140-frame) rig-chain poses for 023: down-SfM (TXT model, argv1) ->
 Sim3 to GPS ENU -> pano_cams json in the kernel y-down convention. Keeps the
 photometric R_rig in rig023.npz untouched (stitching is separate).
-usage: rig_solve_dense.py <down_sparse_txt_dir> <n_frames> <out_json> <pano_dir_rel>
+usage: rig_solve_dense.py <down_sparse_txt_dir> <n_frames> <out_json> <pano_dir_rel> [pano_stride=1]
+(pano index for frame k = pano_stride*(k-1)+1, for subsampled SfM over dense panos)
 """
 import sys, os, math, json, struct
 import numpy as np
@@ -10,6 +11,7 @@ import numpy as np
 ROOT = "/w"
 DOWN_M, N = sys.argv[1], int(sys.argv[2])
 OUT_JSON, PANO_REL = sys.argv[3], sys.argv[4]
+PSTRIDE = int(sys.argv[5]) if len(sys.argv) > 5 else 1
 
 def read_model(p):
     cams = {}
@@ -62,7 +64,7 @@ for n in names_d:
     R_i, C_i = dn[n]
     Rwp = R_e2c.T @ R_i @ R_a.T
     C = s_a * R_a @ C_i + t_a
-    k = idx_of(n)
+    k = PSTRIDE * (idx_of(n) - 1) + 1
     cams.append({"idx": k, "image": f"{PANO_REL}/pano_{k:04d}.jpg",
                  "R_wp": Rwp.tolist(), "T": (-Rwp@C).tolist(), "C": C.tolist(),
                  "n_crops": 1, "ref_yaw": 0.0, "ref_pitch": 0.0})
