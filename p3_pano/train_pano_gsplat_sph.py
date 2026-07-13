@@ -61,13 +61,21 @@ strat = DefaultStrategy(verbose=False, refine_stop_iter=int(ITERS * _RSF),
 print(f"[pano-gsplat-sph] densify: grow_grad2d={_GG} refine_stop={int(ITERS*_RSF)}")
 strat.check_sanity(splats, opt); state = strat.initialize_state(scene_scale=extent)
 
+MASK_DIR = os.environ.get("MASK_DIR", "")  # per-pano weight masks (dynamic-content downweight)
+
 def load_cam(c, i):
     R = np.array(c["R_wp"], np.float32); T = np.array(c["T"], np.float32)
     vm = np.eye(4, dtype=np.float32); vm[:3, :3] = R; vm[:3, 3] = T
     im = Image.open(c["image"]).convert("RGB").resize((W, H), Image.LANCZOS)
     gt = torch.tensor(np.asarray(im), dtype=torch.float32, device=dev).permute(2, 0, 1) / 255.0
+    wmask = None
+    if MASK_DIR:
+        mp = os.path.join(MASK_DIR, f"pano_{c['idx']:04d}.png")
+        if os.path.exists(mp):
+            wm = Image.open(mp).convert("L").resize((W, H), Image.BILINEAR)
+            wmask = torch.tensor(np.asarray(wm), dtype=torch.float32, device=dev)[None] / 255.0  # (1,H,W)
     return {"vm": torch.tensor(vm, device=dev), "C": torch.tensor(np.array(c["C"], np.float32), device=dev),
-            "R": torch.tensor(R, device=dev), "i": i,
+            "R": torch.tensor(R, device=dev), "i": i, "wmask": wmask,
             "gt": gt, "name": f"pano_{c['idx']:04d}"}
 
 cams = [load_cam(c, i) for i, c in enumerate(meta["cameras"])]
@@ -127,7 +135,11 @@ for step in range(ITERS):
     img, info = render(cam, sh_deg)
     strat.step_pre_backward(params=splats, optimizers=opt, state=state, step=step, info=info)
     gt = cam["gt"]
-    loss = 0.8 * (img - gt).abs().mean() + 0.2 * (1.0 - ssim(img[None], gt[None]))
+    if cam.get("wmask") is not None:  # dynamic-content downweight (0.1 floor keeps geometry grounded)
+        wt = cam["wmask"].clamp(min=0.1)
+        loss = 0.8 * ((img - gt).abs() * wt).sum() / (wt.sum() * 3) + 0.2 * (1.0 - ssim((img * wt)[None], (gt * wt)[None]))
+    else:
+        loss = 0.8 * (img - gt).abs().mean() + 0.2 * (1.0 - ssim(img[None], gt[None]))
     if POSE_OPT:  # anchor deltas to the GPS/IMU prior (sigma_r~2deg, sigma_t~2m)
         i = cam["i"]
         loss = loss + float(os.environ.get("POSE_REG", "0.01")) * (
