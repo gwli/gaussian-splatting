@@ -178,9 +178,15 @@
       log('Viewer constructed');
 
       // Format is auto-detected from extension (.ksplat / .ply / .splat / .spz)
-      viewer.addSplatScene(sceneUrl, {
+      // Retry once: headset WiFi power-save can stall the body stream mid-download.
+      const loadOnce = () => viewer.addSplatScene(sceneUrl, {
         'progressiveLoad': false,
         'showLoadingUI': true,
+      });
+      loadOnce()
+      .catch(err => {
+        log(`addSplatScene failed (${err.message}), retrying once...`, '#fa0');
+        return loadOnce();
       })
       .then(() => {
         log(`✓ Loaded ${scene}. Click "Enter VR" (right corner) to view in PICO.`);
