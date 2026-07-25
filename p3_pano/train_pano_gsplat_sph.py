@@ -79,7 +79,17 @@ def load_cam(c, i):
             "gt": gt, "name": f"pano_{c['idx']:04d}"}
 
 cams = [load_cam(c, i) for i, c in enumerate(meta["cameras"])]
-test = cams[::8]; train = [c for i, c in enumerate(cams) if i % 8 != 0]
+# TEST_IDX_FILE: explicit held-out pano indices (one per line). Required for fair
+# cross-density comparison -- the default cams[::8] makes test views land closer
+# to train views as density grows (leak), which flatters denser runs.
+_tif = os.environ.get("TEST_IDX_FILE", "")
+if _tif:
+    hold = {int(l) for l in open(_tif) if l.strip()}
+    test = [c for c, m in zip(cams, meta["cameras"]) if m["idx"] in hold]
+    train = [c for c, m in zip(cams, meta["cameras"]) if m["idx"] not in hold]
+    print(f"[split] held-out from {_tif}: {len(test)} test / {len(train)} train")
+else:
+    test = cams[::8]; train = [c for i, c in enumerate(cams) if i % 8 != 0]
 print(f"[pano-gsplat-sph] {len(cams)} cams -> {len(train)} train / {len(test)} test")
 
 # optional in-training pose refinement (BA): POSE_OPT=1 -> per-camera so3

@@ -31,7 +31,15 @@ colors = torch.cat([sh0, shN], 1)
 print(f"loaded {len(xyz)} gaussians, shN={nrest//3} coefs")
 
 cams = meta["cameras"]
-test_idx = list(range(0, len(cams), 8))[:32]
+# TEST_IDX_FILE: explicit held-out pano indices (same file the trainer uses).
+# Without it we fall back to every-8th, which on a continuous trajectory puts
+# test views closer to train views the denser the run -> inflates dense results.
+_tif = os.environ.get("TEST_IDX_FILE", "")
+if _tif:
+    hold = {int(l) for l in open(_tif) if l.strip()}
+    test_idx = [i for i, c in enumerate(cams) if c["idx"] in hold]
+else:
+    test_idx = list(range(0, len(cams), 8))[:32]
 def grad(x):
     gx = np.abs(np.diff(x, axis=1)); gy = np.abs(np.diff(x, axis=0))
     return gx[:-1, :] + gy[:, :-1]
