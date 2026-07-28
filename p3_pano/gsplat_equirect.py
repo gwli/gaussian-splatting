@@ -27,7 +27,7 @@ from gsplat.cuda._wrapper import (isect_tiles, isect_offset_encode,
 
 
 def render_equirect_fused(means, quats, scales, opacities, sh_coeffs, viewmat,
-                          cam_center, W, H, sh_degree, tile_size=16):
+                          cam_center, W, H, sh_degree, tile_size=16, absgrad=False):
     """T-F8: native FUSED equirect rasterizer. Uses gsplat's fully_fused_projection
     with camera_model="equirect" (our new CUDA projection + analytic VJP), then
     gsplat's fast tile compositor. All-CUDA fwd+bwd, one equirect pass."""
@@ -46,7 +46,13 @@ def render_equirect_fused(means, quats, scales, opacities, sh_coeffs, viewmat,
                                             packed=False, n_images=1,
                                             conics=conics, opacities=op)
     offs = isect_offset_encode(isect_ids, 1, tw, th)
-    img, _ = rasterize_to_pixels(means2d, conics, colors, op, W, H, tile_size, offs, flatten_ids)
+    # absgrad (AbsGS / Pixel-GS): backward writes means2d.absgrad, which lets the
+    # densifier split by |grad| instead of mean-grad -- targets exactly the
+    # "more gaussians but detail lands in the wrong place" failure (section 34).
+    if absgrad and means2d.requires_grad:      # no-op under torch.no_grad() (eval)
+        means2d.retain_grad()
+    img, _ = rasterize_to_pixels(means2d, conics, colors, op, W, H, tile_size, offs,
+                                 flatten_ids, absgrad=absgrad)
     info = {"means2d": means2d, "radii": radii, "width": W, "height": H,
             "n_cameras": 1, "gaussian_ids": None}
     return img[0], info

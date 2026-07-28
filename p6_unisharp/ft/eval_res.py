@@ -43,10 +43,20 @@ def grad(x):
     gx = torch.abs(x[:, 1:] - x[:, :-1]); gy = torch.abs(x[1:, :] - x[:-1, :])
     return gx[:-1] + gy[:, :-1]
 
-print(f"{'model':38s} {'N':>9} {'PSNR@'+str(hiW):>10} {'PSNR@'+str(loW):>10} {'sharp@'+str(hiW):>10}")
+sys.path.insert(0, REPO)
+from lpipsPyTorch import lpips as _lpips
+def _ssim(a, b):                      # same 11x11 uniform-window SSIM as the trainer
+    C1, C2 = 0.01**2, 0.03**2
+    k = torch.ones(3, 1, 11, 11, device=a.device) / 121.0
+    ma = F.conv2d(a, k, padding=5, groups=3); mb = F.conv2d(b, k, padding=5, groups=3)
+    va = F.conv2d(a*a, k, padding=5, groups=3) - ma**2
+    vb = F.conv2d(b*b, k, padding=5, groups=3) - mb**2
+    vab = F.conv2d(a*b, k, padding=5, groups=3) - ma*mb
+    return float((((2*ma*mb+C1)*(2*vab+C2))/((ma**2+mb**2+C1)*(va+vb+C2))).mean())
+print(f"{'model':22s} {'N':>9} {'PSNR@'+str(loW):>10} {'SSIM@'+str(loW):>10} {'LPIPS@'+str(loW):>11} {'sharp@'+str(hiW):>10}")
 for p in plys:
     G = load_ply(p)
-    hi, lo, sh = [], [], []
+    hi, lo, sh, ss, lp = [], [], [], [], []
     with torch.no_grad():
         for c in test:
             R = np.array(c["R_wp"], np.float32); T = np.array(c["T"], np.float32)
@@ -63,5 +73,6 @@ for p in plys:
             lo.append(float(-10 * torch.log10(((il - gl) ** 2).mean())))
             r, g = img.mean(0)[hiH // 4:], gt.mean(0)[hiH // 4:]
             sh.append(100 * float(grad(r).mean() / (grad(g).mean() + 1e-8)))
-    print(f"{os.path.relpath(p, 'p6_unisharp/ft/runs'):38s} {len(G['xyz']):9d} "
-          f"{np.mean(hi):10.3f} {np.mean(lo):10.3f} {np.mean(sh):9.1f}%")
+            ss.append(_ssim(il[None], gl[None])); lp.append(float(_lpips(il[None], gl[None], net_type='vgg')))
+    print(f"{p.split('/runs/')[1].split('/')[0]:22s} {len(G['xyz']):9d} "
+          f"{np.mean(lo):10.3f} {np.mean(ss):10.4f} {np.mean(lp):11.4f} {np.mean(sh):9.1f}%")

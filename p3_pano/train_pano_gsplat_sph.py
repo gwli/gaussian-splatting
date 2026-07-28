@@ -56,18 +56,28 @@ opt = {k: torch.optim.Adam([{"params": splats[k], "lr": lr}], eps=1e-15) for k, 
 # REFINE_STOP_FRAC -> keep densifying longer. Defaults = gsplat DefaultStrategy.
 _GG = float(os.environ.get("GROW_GRAD2D", "0.0002"))
 _RSF = float(os.environ.get("REFINE_STOP_FRAC", "0.5"))
+MASK_DIR = os.environ.get("MASK_DIR", "")  # per-pano weight masks (dynamic-content downweight)
+GT_ON_GPU = os.environ.get("GT_ON_GPU", "0") == "1"   # legacy behaviour; off = CPU cache
+ABSGRAD = os.environ.get("ABSGRAD", "0") == "1"
+
+def gt_of(cam):                            # uint8 (H,W,3) -> float (3,H,W) on device
+    return cam["gt"].to(dev, non_blocking=True).permute(2, 0, 1).float() / 255.0
+
 strat = DefaultStrategy(verbose=False, refine_stop_iter=int(ITERS * _RSF),
-                        reset_every=3000, refine_every=100, grow_grad2d=_GG)
+                        reset_every=3000, refine_every=100, grow_grad2d=_GG,
+                        absgrad=ABSGRAD)
 print(f"[pano-gsplat-sph] densify: grow_grad2d={_GG} refine_stop={int(ITERS*_RSF)}")
 strat.check_sanity(splats, opt); state = strat.initialize_state(scene_scale=extent)
-
-MASK_DIR = os.environ.get("MASK_DIR", "")  # per-pano weight masks (dynamic-content downweight)
 
 def load_cam(c, i):
     R = np.array(c["R_wp"], np.float32); T = np.array(c["T"], np.float32)
     vm = np.eye(4, dtype=np.float32); vm[:3, :3] = R; vm[:3, 3] = T
     im = Image.open(c["image"]).convert("RGB").resize((W, H), Image.LANCZOS)
-    gt = torch.tensor(np.asarray(im), dtype=torch.float32, device=dev).permute(2, 0, 1) / 255.0
+    # GT lives on the CPU as uint8 and is uploaded per iteration. Keeping every
+    # frame on the GPU as float32 was what capped training at 1024x512:
+    # 390 views at 4096x2048 would need 39 GB (0.6 GB as uint8 on the host).
+    gt = torch.from_numpy(np.asarray(im).copy())                     # (H,W,3) uint8, cpu
+    if GT_ON_GPU: gt = gt.to(dev)
     wmask = None
     if MASK_DIR:
         mp = os.path.join(MASK_DIR, f"pano_{c['idx']:04d}.png")
@@ -121,11 +131,12 @@ def render(cam, sh_deg, use_pose=True):
         vm = torch.cat([torch.cat([Rp, -(Rp @ Cp)[:, None]], 1),
                         torch.tensor([[0, 0, 0, 1.0]], device=dev)], 0)
         img, info = _render_fn(splats["means"], splats["quats"], torch.exp(splats["scales"]),
-                               torch.sigmoid(splats["opacities"]), colors, vm, Cp, W, H, sh_deg)
+                               torch.sigmoid(splats["opacities"]), colors, vm, Cp, W, H, sh_deg,
+                               absgrad=ABSGRAD)
     else:
         img, info = _render_fn(splats["means"], splats["quats"], torch.exp(splats["scales"]),
                                torch.sigmoid(splats["opacities"]), colors, cam["vm"], cam["C"],
-                               W, H, sh_deg)
+                               W, H, sh_deg, absgrad=ABSGRAD)
     return img.permute(2, 0, 1).clamp(0, 1), info     # (3,H,W)
 
 def ssim(a, b):
@@ -144,7 +155,7 @@ for step in range(ITERS):
     cam = stack.pop()
     img, info = render(cam, sh_deg)
     strat.step_pre_backward(params=splats, optimizers=opt, state=state, step=step, info=info)
-    gt = cam["gt"]
+    gt = gt_of(cam)
     if cam.get("wmask") is not None:  # dynamic-content downweight (0.1 floor keeps geometry grounded)
         wt = cam["wmask"].clamp(min=0.1)
         loss = 0.8 * ((img - gt).abs() * wt).sum() / (wt.sum() * 3) + 0.2 * (1.0 - ssim((img * wt)[None], (gt * wt)[None]))
@@ -201,7 +212,7 @@ except Exception:
 ps, ss, lp = [], [], []
 with torch.no_grad():
     for cam in test:
-        img, _ = render(cam, SH_MAX); gt = cam["gt"]
+        img, _ = render(cam, SH_MAX); gt = gt_of(cam)
         ps.append(psnr(img, gt)); ss.append(float(ssim(img[None], gt[None])))
         if HAVE: lp.append(float(_lpips(img[None], gt[None], net_type="vgg")))
 res = {"scene": os.path.basename(os.path.dirname(out_dir)) or out_dir,
