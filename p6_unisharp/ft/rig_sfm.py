@@ -25,6 +25,10 @@ ap.add_argument("--lenses", default="down,up",
                 help="'down,up' = rig-constrained; 'down' = single-lens control "
                      "on the identical frame set (isolates the frame-count factor)")
 ap.add_argument("--tag", default="rig")
+ap.add_argument("--mask-up", action="store_true",
+                help="restrict UP-lens features to the horizon ring (theta 80-100 deg). "
+                     "The up lens otherwise images sky/clouds, whose features move and "
+                     "corrupt BA (see section 35).")
 a = ap.parse_args()
 LENSES = a.lenses.split(",")
 
@@ -78,10 +82,34 @@ assert cfg[0].cameras[0].camera is not None and cfg[0].cameras[1].cam_from_rig i
 print(f"[rig-sfm] rig: up_from_down quat(wxyz)={np.round(q,5).tolist()} | "
       f"model={cfg[0].cameras[0].camera.model.name}", flush=True)
 
+# ---- stage 2b: optional feature masks ---------------------------------------
+# COLMAP convention: <mask_path>/<image sub-path>.png, black pixels are ignored.
+MASKS = ""
+if a.mask_up:
+    from PIL import Image
+    MASKS = os.path.join(a.root, f"masks_{a.tag}"); os.makedirs(MASKS, exist_ok=True)
+    yy, xx = np.mgrid[0:1920, 0:1920]
+    rr = np.hypot(yy - 959.5, xx - 959.5)
+    def r_of(th_deg):                    # OPENCV_FISHEYE forward model
+        t = np.radians(th_deg)
+        return a.f * t * (1 + K[0]*t**2 + K[1]*t**4 + K[2]*t**6 + K[3]*t**8)
+    ring = ((rr >= r_of(80.0)) & (rr <= r_of(100.0))).astype(np.uint8) * 255
+    tmpl = {}
+    for sub in LENSES:
+        d = os.path.join(MASKS, sub); os.makedirs(d, exist_ok=True)
+        m = ring if sub == "up" else np.full((1920, 1920), 255, np.uint8)
+        p = os.path.join(MASKS, f"_{sub}.png"); Image.fromarray(m).save(p); tmpl[sub] = p
+        for k in idxs:
+            t = os.path.join(d, f"f_{k:04d}.jpg.png")
+            if not os.path.exists(t): os.link(p, t)
+    print(f"[rig-sfm] up-lens mask: horizon ring r={r_of(80):.0f}-{r_of(100):.0f}px "
+          f"({100*ring.mean()/255:.1f}% of frame kept)", flush=True)
+
 # ---- stage 3: features + matching + rig-constrained mapping ------------------
 db = os.path.join(a.root, f"{a.tag}.db")
 if not os.path.exists(db):
     ropts = pycolmap.ImageReaderOptions()
+    if MASKS: ropts.mask_path = MASKS
     pycolmap.extract_features(db, IMG, camera_mode=pycolmap.CameraMode.PER_FOLDER,
                               reader_options=ropts)
     print("[rig-sfm] features done", flush=True)
