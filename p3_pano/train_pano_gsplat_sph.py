@@ -32,9 +32,33 @@ xyz = np.stack([v["x"], v["y"], v["z"]], 1).astype(np.float32)
 rgb = (np.stack([v["red"], v["green"], v["blue"]], 1).astype(np.float32) / 255.0
        if "red" in v.data.dtype.names else np.full_like(xyz, 0.5))
 N = xyz.shape[0]
+# Sky sphere (as in GGPS/PanoLOG create_from_pcd): a shell of far-field gaussians so
+# the sky is not represented by stretched near-field ones. Uniform on a sphere of
+# radius 5x the scene radius, pale blue-white, 10x the kNN scale. Placed first, and
+# (matching their coarse stage) optimised normally rather than locked.
+SKYBOX_NUM = int(os.environ.get("SKYBOX_NUM", "0"))
+SKYBOX_MULT = float(os.environ.get("SKYBOX_MULT", "5.0"))
+if SKYBOX_NUM > 0:
+    ctr = xyz.mean(0)
+    radius = float(np.linalg.norm(xyz - ctr, axis=1).max())
+    rng = np.random.default_rng(0)
+    th = 2 * np.pi * rng.random(SKYBOX_NUM)
+    ph = np.arccos(1.0 - 2.0 * rng.random(SKYBOX_NUM))
+    sky = np.stack([np.cos(th) * np.sin(ph), np.sin(th) * np.sin(ph), np.cos(ph)], 1)
+    sky = (sky * radius * SKYBOX_MULT + ctr).astype(np.float32)
+    sky_rgb = np.tile(np.array([[0.7, 0.8, 0.95]], np.float32), (SKYBOX_NUM, 1))
+    xyz = np.concatenate([sky, xyz]); rgb = np.concatenate([sky_rgb, rgb])
+    N = xyz.shape[0]
+    print(f"[skybox] {SKYBOX_NUM} sky gaussians at r={radius*SKYBOX_MULT:.1f} "
+          f"({SKYBOX_MULT}x scene radius {radius:.1f}); total init {N}")
+
 from scipy.spatial import cKDTree
 dd, _ = cKDTree(xyz).query(xyz, k=4)
-scales0 = np.log(np.sqrt(np.clip((dd[:, 1:] ** 2).mean(1), 1e-8, None)))[:, None].repeat(3, 1).astype(np.float32)
+_d2 = np.clip((dd[:, 1:] ** 2).mean(1), 1e-8, None)
+if SKYBOX_NUM > 0:
+    _d2[:SKYBOX_NUM] *= 10.0                      # their skybox scale boost
+    _d2[SKYBOX_NUM:] = np.minimum(_d2[SKYBOX_NUM:], 10.0)
+scales0 = np.log(np.sqrt(_d2))[:, None].repeat(3, 1).astype(np.float32)
 def RGB2SH(c): return (c - 0.5) / 0.28209479177387814
 sh0 = torch.tensor(RGB2SH(rgb), dtype=torch.float32, device=dev)[:, None, :]
 shN = torch.zeros((N, (SH_MAX + 1) ** 2 - 1, 3), dtype=torch.float32, device=dev)
