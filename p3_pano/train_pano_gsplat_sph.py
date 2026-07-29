@@ -117,6 +117,27 @@ _LRS = float(os.environ.get("LR_SCALE_POS", "1.0"))     # their c4: 0.000064/0.0
 lrs = {"means": 0.00016 * extent * _LRS, "scales": 0.005 * (0.4 if _LRS < 1 else 1.0),
        "quats": 0.001, "opacities": 0.05, "sh0": 0.0025, "shN": 0.0025 / 20}
 opt = {k: torch.optim.Adam([{"params": splats[k], "lr": lr}], eps=1e-15) for k, lr in lrs.items()}
+# resume the Adam moments saved next to INIT_PLY, so a fine-tune continues the optimiser
+# instead of restarting it from zero momentum. Block runs subset the moments with the
+# same mask as the gaussians, keeping state and parameters aligned.
+_ck = os.path.join(os.path.dirname(INIT_PLY), "optim.pt") if INIT_PLY else ""
+if os.environ.get("COLD_OPTIM", "0") == "1": _ck = ""   # ablation: force a cold optimiser
+if _ck and os.path.exists(_ck):
+    _sd = torch.load(_ck, map_location=dev, weights_only=False)
+    _msk = torch.tensor(_keep, device=dev) if (BLOCK_JSON and BLOCK_ID >= 0) else None
+    for k, o in opt.items():
+        st = _sd["opt"][k]
+        if _msk is not None:
+            for s in st["state"].values():
+                for m in ("exp_avg", "exp_avg_sq"):
+                    if m in s: s[m] = s[m][_msk]
+        o.load_state_dict(st)
+        for g in o.param_groups: g["lr"] = lrs[k]      # keep this run's lr, not the saved one
+    print(f"[resume] restored Adam moments from {_ck}"
+          + (f" (subset to {int(_keep.sum())} gaussians)" if _msk is not None else ""))
+elif INIT_PLY:
+    print(f"[resume] WARNING no optim.pt next to INIT_PLY -- optimiser restarts cold "
+          f"(costs ~0.87 dB, see task_ft.md 39)")
 # densification knobs (env): lower GROW_GRAD2D -> grow more gaussians; higher
 # REFINE_STOP_FRAC -> keep densifying longer. Defaults = gsplat DefaultStrategy.
 _GG = float(os.environ.get("GROW_GRAD2D", "0.0002"))
@@ -289,6 +310,12 @@ with torch.no_grad():
     os.makedirs(pc_dir, exist_ok=True)
     _PD([_PE.describe(elems, "vertex")]).write(os.path.join(pc_dir, "point_cloud.ply"))
     print(f"[PLY] saved {Ng} gaussians -> {pc_dir}/point_cloud.ply")
+    # Adam moments alongside the ply. Without these a "fine-tune" restarts the optimiser
+    # from zero momentum, which measurably damages the model (-0.87 dB, see task_ft.md 39)
+    # and gets misread as the fine-tuning method failing.
+    torch.save({"n": Ng, "opt": {k: o.state_dict() for k, o in opt.items()}},
+               os.path.join(pc_dir, "optim.pt"))
+    print(f"[CKPT] saved optimiser state -> {pc_dir}/optim.pt")
 
 def psnr(a, b): return float(-10 * torch.log10(((a - b) ** 2).mean()))
 try:
