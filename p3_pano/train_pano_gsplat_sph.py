@@ -25,12 +25,32 @@ os.makedirs(out_dir, exist_ok=True)
 dev = "cuda"; SH_MAX = 3
 meta = json.load(open(cams_json))
 
-# init gaussians from VGGT points3D.ply
+# init gaussians from VGGT points3D.ply, or resume a trained model (INIT_PLY)
 from plyfile import PlyData
-v = PlyData.read(meta["point_cloud"])["vertex"]
+INIT_PLY = os.environ.get("INIT_PLY", "")     # resume: full gaussian state from a ply
+BLOCK_JSON = os.environ.get("BLOCK_JSON", "")   # blocks.json from block_split.py
+BLOCK_ID = int(os.environ.get("BLOCK_ID", "-1"))
+BLOCK_MARGIN = float(os.environ.get("BLOCK_MARGIN", "0.15"))
+v = PlyData.read(INIT_PLY if INIT_PLY else meta["point_cloud"])["vertex"].data
+_bi = None
+if INIT_PLY and BLOCK_JSON and BLOCK_ID >= 0:
+    _bi = json.load(open(BLOCK_JSON))
+    _ax = np.array(_bi["axis"]); _bc = np.array(_bi["ctr"]); _ed = np.array(_bi["edges"])
+    _xyz = np.stack([v["x"], v["y"], v["z"]], 1)
+    _t = (_xyz - _bc) @ _ax
+    _sp = (_ed[-1] - _ed[0]) / (len(_ed) - 1)
+    _lo = _ed[BLOCK_ID] - BLOCK_MARGIN * _sp
+    _hi = _ed[BLOCK_ID + 1] + BLOCK_MARGIN * _sp
+    # the sky shell sits at ~5x the scene radius; anything past 2x the full-scene camera
+    # radius is sky and is shared by every block (frozen, not re-optimised).
+    _far = np.linalg.norm(_xyz - _bc, axis=1) > 2.0 * _bi["cam_radius"]
+    _keep = ((_t >= _lo) & (_t <= _hi)) | _far          # own slab + the shared sky shell
+    v = v[_keep]
+    print(f"[block {BLOCK_ID}] kept {int(_keep.sum())}/{len(_keep)} gaussians "
+          f"(slab {_lo:.0f}..{_hi:.0f} along axis, +{int(_far.sum())} far-field)")
 xyz = np.stack([v["x"], v["y"], v["z"]], 1).astype(np.float32)
 rgb = (np.stack([v["red"], v["green"], v["blue"]], 1).astype(np.float32) / 255.0
-       if "red" in v.data.dtype.names else np.full_like(xyz, 0.5))
+       if "red" in v.dtype.names else np.full_like(xyz, 0.5))
 N = xyz.shape[0]
 # Sky sphere (as in GGPS/PanoLOG create_from_pcd): a shell of far-field gaussians so
 # the sky is not represented by stretched near-field ones. Uniform on a sphere of
@@ -73,8 +93,29 @@ splats = torch.nn.ParameterDict({
     "sh0":       torch.nn.Parameter(sh0),
     "shN":       torch.nn.Parameter(shN),
 }).to(dev)
-lrs = {"means": 0.00016 * extent, "scales": 0.005, "quats": 0.001,
-       "opacities": 0.05, "sh0": 0.0025, "shN": 0.0025 / 20}
+if INIT_PLY:                                    # overwrite with the trained state
+    _nr = len([n for n in v.dtype.names if n.startswith("f_rest_")])
+    _fr = np.stack([v[f"f_rest_{i}"] for i in range(_nr)], 1).astype(np.float32)
+    with torch.no_grad():
+        splats["sh0"].copy_(torch.tensor(np.stack([v[f"f_dc_{i}"] for i in range(3)], 1),
+                                         dtype=torch.float32, device=dev)[:, None, :])
+        splats["shN"].copy_(torch.tensor(_fr.reshape(len(_fr), 3, _nr // 3).transpose(0, 2, 1).copy(),
+                                         device=dev))
+        splats["opacities"].copy_(torch.tensor(np.asarray(v["opacity"], np.float32), device=dev))
+        splats["scales"].copy_(torch.tensor(np.stack([v[f"scale_{i}"] for i in range(3)], 1),
+                                            dtype=torch.float32, device=dev))
+        splats["quats"].copy_(torch.tensor(np.stack([v[f"rot_{i}"] for i in range(4)], 1),
+                                           dtype=torch.float32, device=dev))
+    print(f"[resume] loaded {N} gaussians from {INIT_PLY}")
+
+# SKY_FREEZE_R: freeze gaussians farther than R x scene radius from the camera centroid
+# (GGPS locks the sky shell during block refinement). Selected geometrically, not by
+# index, so it survives the densifier reordering entries.
+SKY_FREEZE_R = float(os.environ.get("SKY_FREEZE_R", "0"))
+
+_LRS = float(os.environ.get("LR_SCALE_POS", "1.0"))     # their c4: 0.000064/0.00016 = 0.4
+lrs = {"means": 0.00016 * extent * _LRS, "scales": 0.005 * (0.4 if _LRS < 1 else 1.0),
+       "quats": 0.001, "opacities": 0.05, "sh0": 0.0025, "shN": 0.0025 / 20}
 opt = {k: torch.optim.Adam([{"params": splats[k], "lr": lr}], eps=1e-15) for k, lr in lrs.items()}
 # densification knobs (env): lower GROW_GRAD2D -> grow more gaussians; higher
 # REFINE_STOP_FRAC -> keep densifying longer. Defaults = gsplat DefaultStrategy.
@@ -87,8 +128,9 @@ ABSGRAD = os.environ.get("ABSGRAD", "0") == "1"
 def gt_of(cam):                            # uint8 (H,W,3) -> float (3,H,W) on device
     return cam["gt"].to(dev, non_blocking=True).permute(2, 0, 1).float() / 255.0
 
+_RESET = int(os.environ.get("RESET_EVERY", "3000"))
 strat = DefaultStrategy(verbose=False, refine_stop_iter=int(ITERS * _RSF),
-                        reset_every=3000, refine_every=100, grow_grad2d=_GG,
+                        reset_every=_RESET, refine_every=100, grow_grad2d=_GG,
                         absgrad=ABSGRAD)
 print(f"[pano-gsplat-sph] densify: grow_grad2d={_GG} refine_stop={int(ITERS*_RSF)}")
 strat.check_sanity(splats, opt); state = strat.initialize_state(scene_scale=extent)
@@ -125,6 +167,25 @@ if _tif:
 else:
     test = cams[::8]; train = [c for i, c in enumerate(cams) if i % 8 != 0]
 print(f"[pano-gsplat-sph] {len(cams)} cams -> {len(train)} train / {len(test)} test")
+
+_cc = torch.stack([c["C"] for c in cams])           # camera centroid + radius, for SKY_FREEZE_R
+_ctr, _rs = _cc.mean(0), float((_cc - _cc.mean(0)).norm(dim=1).max())
+if _bi is not None:      # a block sees only its own cameras; the sky shell is global
+    _ctr = torch.tensor(_bi["ctr"], dtype=_cc.dtype, device=_cc.device)
+    _rs = float(_bi["cam_radius"])
+if SKY_FREEZE_R > 0:
+    print(f"[sky-lock] freezing gaussians beyond {SKY_FREEZE_R}x scene radius ({SKY_FREEZE_R*_rs:.0f} m)")
+
+def freeze_far_grads():
+    """Zero the gradients of far-field (sky-shell) gaussians so refinement leaves
+    them untouched -- the analogue of GGPS's skybox_locked in the block stage.
+    Caveat: the densifier can still split them; only the parameters are locked."""
+    if SKY_FREEZE_R <= 0: return
+    with torch.no_grad():
+        far = (splats["means"].detach() - _ctr).norm(dim=1) > SKY_FREEZE_R * _rs
+        if far.any():
+            for k, prm in splats.items():
+                if prm.grad is not None: prm.grad[far] = 0
 
 # optional in-training pose refinement (BA): POSE_OPT=1 -> per-camera so3
 # rotation delta (pano frame, left-mul) + metric translation delta on C.
@@ -190,6 +251,7 @@ for step in range(ITERS):
         loss = loss + float(os.environ.get("POSE_REG", "0.01")) * (
             (pose_dr[i] / 0.035).square().sum() + (pose_dt[i] / 2.0).square().sum())
     loss.backward()
+    freeze_far_grads()
     for o in opt.values(): o.step(); o.zero_grad(set_to_none=True)
     if POSE_OPT:
         if step >= POSE_START: pose_opt.step()

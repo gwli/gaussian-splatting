@@ -10,7 +10,11 @@ FAST="${FAST:-0}"   # 1 = skip LPIPS (faster)
 SIM_PAIR_MAX_TR="${SIM_PAIR_MAX_TR:-6.0}"; SIM_PAIR_MIN_OVERLAP="${SIM_PAIR_MIN_OVERLAP:-0.1}"
 FAR="${FAR:-300}"
 # resolve checkpoint to a /w path
-case "$CKPT" in /*) CKW="/w/${CKPT#/raid/git/gaussian-splatting/}";; *) CKW="/w/p6_unisharp/UniSHARP/$CKPT";; esac
+case "$CKPT" in
+  /*)            CKW="/w/${CKPT#$ROOT/}";;          # absolute repo path
+  p6_unisharp/*) CKW="/w/$CKPT";;                   # repo-relative
+  *)             CKW="/w/p6_unisharp/UniSHARP/$CKPT";;  # UniSHARP-relative (weights/...)
+esac
 OUT=/w/p6_unisharp/ft/runs/eval_${VAL}_${TAG}
 mkdir -p "$FT/runs"; chmod -R 777 "$FT" 2>/dev/null || true
 FASTFLAG=""; [ "$FAST" = "1" ] && FASTFLAG="--fast-metrics"
