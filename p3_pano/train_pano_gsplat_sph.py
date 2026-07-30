@@ -154,6 +154,11 @@ DEPTH_W_END = float(os.environ.get("DEPTH_W_END", "0.001"))
 # targets a constant *effective* strength by dividing by the step-0 residual, which is
 # what makes a single setting usable across scenes we cannot sweep individually.
 DEPTH_NORM = float(os.environ.get("DEPTH_NORM", "0"))
+# Run length and anneal speed are the same knob while the anneal is indexed by
+# step/ITERS: a 45k run still has a high depth weight at step 30k, so "longer helps"
+# and "a slower anneal helps" are indistinguishable. Setting this to N anneals over N
+# steps regardless of run length, which separates the two.
+DEPTH_ANNEAL_ITERS = int(os.environ.get("DEPTH_ANNEAL_ITERS", "0"))
 _dnorm = None
 GT_ON_GPU = os.environ.get("GT_ON_GPU", "0") == "1"   # legacy behaviour; off = CPU cache
 ABSGRAD = os.environ.get("ABSGRAD", "0") == "1"
@@ -370,7 +375,8 @@ for step in range(ITERS):
                 if DEPTH_NORM > 0 and _dnorm is None:
                     _dnorm = DEPTH_NORM / max(float(dloss), 1e-6)   # constant strength
                 w0 = _dnorm if _dnorm is not None else DEPTH_W
-                w_now = w0 * (DEPTH_W_END / w0) ** (step / max(ITERS - 1, 1))
+                _ai = DEPTH_ANNEAL_ITERS or ITERS
+                w_now = w0 * (DEPTH_W_END / w0) ** min(step / max(_ai - 1, 1), 1.0)
                 if step == 0:      # prove the term is live, not silently zero
                     print(f"[depth] {int(m.sum())} valid px, log-residual {float(dloss):.4f}, "
                           f"w {w_now:.4f} -> photometric {float(loss):.4f}", flush=True)
