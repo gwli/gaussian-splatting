@@ -148,6 +148,13 @@ MASK_DIR = os.environ.get("MASK_DIR", "")  # per-pano weight masks (dynamic-cont
 DEPTH_DIR = os.environ.get("DEPTH_DIR", "")
 DEPTH_W = float(os.environ.get("DEPTH_W", "0.05"))
 DEPTH_W_END = float(os.environ.get("DEPTH_W_END", "0.001"))
+# The prior disagrees with the model by a scene-dependent amount (log residual 0.81 on
+# 027 vs 1.51 on 021), so a fixed DEPTH_W is not a fixed strength: the per-scene optima
+# spread 2.7x (0.15/0.15/0.4) while weight x residual only spreads 1.7x. DEPTH_NORM
+# targets a constant *effective* strength by dividing by the step-0 residual, which is
+# what makes a single setting usable across scenes we cannot sweep individually.
+DEPTH_NORM = float(os.environ.get("DEPTH_NORM", "0"))
+_dnorm = None
 GT_ON_GPU = os.environ.get("GT_ON_GPU", "0") == "1"   # legacy behaviour; off = CPU cache
 ABSGRAD = os.environ.get("ABSGRAD", "0") == "1"
 
@@ -297,9 +304,12 @@ for step in range(ITERS):
             if m.any():
                 lr_, lp_ = rend[m].clamp_min(1e-3).log(), dp[0][m].log()
                 cw = dp[1][m]
-                w_now = DEPTH_W * (DEPTH_W_END / DEPTH_W) ** (step / max(ITERS - 1, 1))
                 dloss = (((lr_ - lr_.mean()) - (lp_ - lp_.mean())).abs()
                          * cw).sum() / cw.sum().clamp_min(1e-6)
+                if DEPTH_NORM > 0 and _dnorm is None:
+                    _dnorm = DEPTH_NORM / max(float(dloss), 1e-6)   # constant strength
+                w0 = _dnorm if _dnorm is not None else DEPTH_W
+                w_now = w0 * (DEPTH_W_END / w0) ** (step / max(ITERS - 1, 1))
                 if step == 0:      # prove the term is live, not silently zero
                     print(f"[depth] {int(m.sum())} valid px, log-residual {float(dloss):.4f}, "
                           f"w {w_now:.4f} -> photometric {float(loss):.4f}", flush=True)
