@@ -136,8 +136,8 @@ if _ck and os.path.exists(_ck):
     print(f"[resume] restored Adam moments from {_ck}"
           + (f" (subset to {int(_keep.sum())} gaussians)" if _msk is not None else ""))
 elif INIT_PLY:
-    print(f"[resume] WARNING no optim.pt next to INIT_PLY -- optimiser restarts cold "
-          f"(costs ~0.87 dB, see task_ft.md 39)")
+    print(f"[resume] no optim.pt next to INIT_PLY -- optimiser starts cold "
+          f"(measured neutral, see task_ft.md 40)")
 # densification knobs (env): lower GROW_GRAD2D -> grow more gaussians; higher
 # REFINE_STOP_FRAC -> keep densifying longer. Defaults = gsplat DefaultStrategy.
 _GG = float(os.environ.get("GROW_GRAD2D", "0.0002"))
@@ -190,6 +190,7 @@ def load_cam(c, i):
             dprior = torch.tensor(np.load(dp).astype(np.float32), device=dev)
     return {"vm": torch.tensor(vm, device=dev), "C": torch.tensor(np.array(c["C"], np.float32), device=dev),
             "R": torch.tensor(R, device=dev), "i": i, "wmask": wmask, "dprior": dprior,
+            "idx_ds": int(c["idx"]),      # dataset frame index, for pose-delta export
             "gt": gt, "name": f"pano_{c['idx']:04d}"}
 
 cams = [load_cam(c, i) for i, c in enumerate(meta["cameras"])]
@@ -227,6 +228,12 @@ def freeze_far_grads():
 
 # optional in-training pose refinement (BA): POSE_OPT=1 -> per-camera so3
 # rotation delta (pano frame, left-mul) + metric translation delta on C.
+# EXP_OPT: per-image colour affine (3-channel gain + bias) on the RENDER, trained only.
+# The drone runs auto-exposure, and the held-out diagnostic shows a per-frame photometric
+# residual worth +0.34 dB (027) to +0.80 dB (021) that is additive with the pose residual,
+# i.e. a genuinely separate error. Without this term the map has to absorb AE drift into
+# geometry and colour. Evaluation uses the identity transform, so no test image is touched.
+EXP_OPT = os.environ.get("EXP_OPT", "0") == "1"
 POSE_OPT = os.environ.get("POSE_OPT", "0") == "1"
 POSE_START = int(os.environ.get("POSE_START", "500"))
 pose_dr = torch.zeros(len(cams), 3, device=dev, requires_grad=POSE_OPT)
@@ -236,6 +243,12 @@ pose_opt = torch.optim.Adam([
     {"params": [pose_dt], "lr": float(os.environ.get("POSE_LR_T", "3e-2"))}]) if POSE_OPT else None
 if POSE_OPT:
     print(f"[pose-opt] ON start={POSE_START} lr_r={os.environ.get('POSE_LR_R','1e-3')} lr_t={os.environ.get('POSE_LR_T','3e-2')}")
+exp_g = torch.ones(len(cams), 3, device=dev, requires_grad=EXP_OPT)
+exp_b = torch.zeros(len(cams), 3, device=dev, requires_grad=EXP_OPT)
+exp_opt = torch.optim.Adam([{"params": [exp_g, exp_b],
+                             "lr": float(os.environ.get("EXP_LR", "3e-3"))}]) if EXP_OPT else None
+if EXP_OPT:
+    print(f"[exp-opt] ON lr={os.environ.get('EXP_LR','3e-3')} (train-only; eval uses identity)")
 
 def so3exp(w):
     th = w.norm() + 1e-12; k = w / th
@@ -247,24 +260,24 @@ def so3exp(w):
 
 def render(cam, sh_deg, use_pose=True):
     colors = torch.cat([splats["sh0"], splats["shN"]], 1)
+    # pose deltas and the depth channel are independent choices -- branching on them
+    # separately meant POSE_OPT silently skipped info["depth"] and the depth loss died.
     if POSE_OPT and use_pose:
         i = cam["i"]
         Rp = so3exp(pose_dr[i]) @ cam["R"]
         Cp = cam["C"] + pose_dt[i]
         vm = torch.cat([torch.cat([Rp, -(Rp @ Cp)[:, None]], 1),
                         torch.tensor([[0, 0, 0, 1.0]], device=dev)], 0)
-        img, info = _render_fn(splats["means"], splats["quats"], torch.exp(splats["scales"]),
-                               torch.sigmoid(splats["opacities"]), colors, vm, Cp, W, H, sh_deg,
-                               absgrad=ABSGRAD)
-    elif DEPTH_DIR:
-        img, dep, info = _render_fn(splats["means"], splats["quats"], torch.exp(splats["scales"]),
-                                    torch.sigmoid(splats["opacities"]), colors, cam["vm"], cam["C"],
-                                    W, H, sh_deg, absgrad=ABSGRAD, with_depth=True)
+    else:
+        vm, Cp = cam["vm"], cam["C"]
+    out = _render_fn(splats["means"], splats["quats"], torch.exp(splats["scales"]),
+                     torch.sigmoid(splats["opacities"]), colors, vm, Cp, W, H, sh_deg,
+                     absgrad=ABSGRAD, **({"with_depth": True} if DEPTH_DIR else {}))
+    if DEPTH_DIR:
+        img, dep, info = out
         info["depth"] = dep            # (H,W) expected radial range, for the depth prior
     else:
-        img, info = _render_fn(splats["means"], splats["quats"], torch.exp(splats["scales"]),
-                               torch.sigmoid(splats["opacities"]), colors, cam["vm"], cam["C"],
-                               W, H, sh_deg, absgrad=ABSGRAD)
+        img, info = out
     return img.permute(2, 0, 1).clamp(0, 1), info     # (3,H,W)
 
 def ssim(a, b):
@@ -284,6 +297,9 @@ for step in range(ITERS):
     img, info = render(cam, sh_deg)
     strat.step_pre_backward(params=splats, optimizers=opt, state=state, step=step, info=info)
     gt = gt_of(cam)
+    if EXP_OPT:      # applied to the render, so the map is not asked to explain AE drift
+        _i = cam["i"]
+        img = (img * exp_g[_i][:, None, None] + exp_b[_i][:, None, None]).clamp(0, 1)
     if cam.get("wmask") is not None:  # dynamic-content downweight (0.1 floor keeps geometry grounded)
         wt = cam["wmask"].clamp(min=0.1)
         loss = 0.8 * ((img - gt).abs() * wt).sum() / (wt.sum() * 3) + 0.2 * (1.0 - ssim((img * wt)[None], (gt * wt)[None]))
@@ -321,6 +337,12 @@ for step in range(ITERS):
     loss.backward()
     freeze_far_grads()
     for o in opt.values(): o.step(); o.zero_grad(set_to_none=True)
+    if EXP_OPT:
+        exp_opt.step(); exp_opt.zero_grad(set_to_none=True)
+        with torch.no_grad():   # gauge: the mean exposure stays identity, so the whole
+            _ti = torch.tensor([c["i"] for c in train], device=dev)   # map cannot drift
+            exp_g.data[_ti] /= exp_g.data[_ti].mean(0).clamp_min(1e-6)
+            exp_b.data[_ti] -= exp_b.data[_ti].mean(0)
     if POSE_OPT:
         if step >= POSE_START: pose_opt.step()
         pose_opt.zero_grad(set_to_none=True)
@@ -363,6 +385,19 @@ with torch.no_grad():
     torch.save({"n": Ng, "opt": {k: o.state_dict() for k, o in opt.items()}},
                os.path.join(pc_dir, "optim.pt"))
     print(f"[CKPT] saved optimiser state -> {pc_dir}/optim.pt")
+    if POSE_OPT:
+        # Held-out cameras never receive a gradient, so their deltas stay zero while the
+        # map follows the corrected training poses. Persisting the deltas (with each
+        # camera's dataset idx and whether it was trained) lets apply_pose_deltas.py
+        # interpolate corrections onto the held-out cameras afterwards.
+        _tr = {id(c) for c in train}
+        np.savez(os.path.join(pc_dir, "poses.npz"),
+                 idx=np.array([c["idx_ds"] for c in cams], np.int64),
+                 trained=np.array([id(c) in _tr for c in cams], bool),
+                 dr=pose_dr.detach().cpu().numpy(), dt=pose_dt.detach().cpu().numpy())
+        _dn = pose_dt.detach().norm(dim=1)
+        print(f"[POSE] saved deltas -> {pc_dir}/poses.npz  "
+              f"|dt| med {float(_dn.median()):.3f} m max {float(_dn.max()):.3f} m", flush=True)
 
 def psnr(a, b): return float(-10 * torch.log10(((a - b) ** 2).mean()))
 try:
