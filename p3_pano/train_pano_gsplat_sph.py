@@ -143,6 +143,11 @@ elif INIT_PLY:
 _GG = float(os.environ.get("GROW_GRAD2D", "0.0002"))
 _RSF = float(os.environ.get("REFINE_STOP_FRAC", "0.5"))
 MASK_DIR = os.environ.get("MASK_DIR", "")  # per-pano weight masks (dynamic-content downweight)
+# UniK3D depth priors (gen_depth.py). GGPS enables depth only in the refine stage,
+# annealing the weight down; DEPTH_W/DEPTH_W_END mirror their 1.0 -> 0.001.
+DEPTH_DIR = os.environ.get("DEPTH_DIR", "")
+DEPTH_W = float(os.environ.get("DEPTH_W", "0.05"))
+DEPTH_W_END = float(os.environ.get("DEPTH_W_END", "0.001"))
 GT_ON_GPU = os.environ.get("GT_ON_GPU", "0") == "1"   # legacy behaviour; off = CPU cache
 ABSGRAD = os.environ.get("ABSGRAD", "0") == "1"
 
@@ -171,8 +176,13 @@ def load_cam(c, i):
         if os.path.exists(mp):
             wm = Image.open(mp).convert("L").resize((W, H), Image.BILINEAR)
             wmask = torch.tensor(np.asarray(wm), dtype=torch.float32, device=dev)[None] / 255.0  # (1,H,W)
+    dprior = None
+    if DEPTH_DIR:
+        dp = os.path.join(DEPTH_DIR, f"{c['idx']:05d}.npy")
+        if os.path.exists(dp):     # (2,h,w) = radial metres + confidence, kept at 1024x512
+            dprior = torch.tensor(np.load(dp).astype(np.float32), device=dev)
     return {"vm": torch.tensor(vm, device=dev), "C": torch.tensor(np.array(c["C"], np.float32), device=dev),
-            "R": torch.tensor(R, device=dev), "i": i, "wmask": wmask,
+            "R": torch.tensor(R, device=dev), "i": i, "wmask": wmask, "dprior": dprior,
             "gt": gt, "name": f"pano_{c['idx']:04d}"}
 
 cams = [load_cam(c, i) for i, c in enumerate(meta["cameras"])]
@@ -239,6 +249,11 @@ def render(cam, sh_deg, use_pose=True):
         img, info = _render_fn(splats["means"], splats["quats"], torch.exp(splats["scales"]),
                                torch.sigmoid(splats["opacities"]), colors, vm, Cp, W, H, sh_deg,
                                absgrad=ABSGRAD)
+    elif DEPTH_DIR:
+        img, dep, info = _render_fn(splats["means"], splats["quats"], torch.exp(splats["scales"]),
+                                    torch.sigmoid(splats["opacities"]), colors, cam["vm"], cam["C"],
+                                    W, H, sh_deg, absgrad=ABSGRAD, with_depth=True)
+        info["depth"] = dep            # (H,W) expected radial range, for the depth prior
     else:
         img, info = _render_fn(splats["means"], splats["quats"], torch.exp(splats["scales"]),
                                torch.sigmoid(splats["opacities"]), colors, cam["vm"], cam["C"],
@@ -267,6 +282,28 @@ for step in range(ITERS):
         loss = 0.8 * ((img - gt).abs() * wt).sum() / (wt.sum() * 3) + 0.2 * (1.0 - ssim((img * wt)[None], (gt * wt)[None]))
     else:
         loss = 0.8 * (img - gt).abs().mean() + 0.2 * (1.0 - ssim(img[None], gt[None]))
+    if DEPTH_DIR and DEPTH_W > 0:
+        # UniK3D prior. Monocular range on aerial panoramas is not trustworthy in
+        # absolute scale, so both maps are compared in log space after removing a
+        # per-image scale (the mean log offset) -- this supervises relative geometry
+        # only. Weighted by UniK3D's own confidence; weight decays 1.0 -> DEPTH_W_END
+        # over training, as in their c4 config.
+        dp = cam.get("dprior")
+        if dp is not None:
+            rend = info["depth"][None, None]
+            rend = F.interpolate(rend, size=dp.shape[-2:], mode="bilinear",
+                                 align_corners=False)[0, 0]
+            m = (dp[0] > 0) & (rend > 0)
+            if m.any():
+                lr_, lp_ = rend[m].clamp_min(1e-3).log(), dp[0][m].log()
+                cw = dp[1][m]
+                w_now = DEPTH_W * (DEPTH_W_END / DEPTH_W) ** (step / max(ITERS - 1, 1))
+                dloss = (((lr_ - lr_.mean()) - (lp_ - lp_.mean())).abs()
+                         * cw).sum() / cw.sum().clamp_min(1e-6)
+                if step == 0:      # prove the term is live, not silently zero
+                    print(f"[depth] {int(m.sum())} valid px, log-residual {float(dloss):.4f}, "
+                          f"w {w_now:.4f} -> photometric {float(loss):.4f}", flush=True)
+                loss = loss + w_now * dloss
     if POSE_OPT:  # anchor deltas to the GPS/IMU prior (sigma_r~2deg, sigma_t~2m)
         i = cam["i"]
         loss = loss + float(os.environ.get("POSE_REG", "0.01")) * (
