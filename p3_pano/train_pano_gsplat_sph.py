@@ -233,6 +233,8 @@ def freeze_far_grads():
 # residual worth +0.34 dB (027) to +0.80 dB (021) that is additive with the pose residual,
 # i.e. a genuinely separate error. Without this term the map has to absorb AE drift into
 # geometry and colour. Evaluation uses the identity transform, so no test image is touched.
+# intermediate checkpoints, for monitoring only -- see the caveat at the call site
+SAVE_AT = {int(x) for x in os.environ.get("SAVE_AT", "").split(",") if x.strip()}
 EXP_OPT = os.environ.get("EXP_OPT", "0") == "1"
 POSE_OPT = os.environ.get("POSE_OPT", "0") == "1"
 POSE_START = int(os.environ.get("POSE_START", "500"))
@@ -288,6 +290,49 @@ def ssim(a, b):
     vb = F.conv2d(b * b, k, padding=5, groups=3) - mb ** 2
     vab = F.conv2d(a * b, k, padding=5, groups=3) - ma * mb
     return (((2 * ma * mb + C1) * (2 * vab + C2)) / ((ma ** 2 + mb ** 2 + C1) * (va + vb + C2))).mean()
+
+# save INRIA-format ply (for ksplat / viewers) — matches scene.gaussian_model.save_ply
+from plyfile import PlyData as _PD, PlyElement as _PE
+def save_state(it):
+  with torch.no_grad():
+      xyz = splats["means"].detach().cpu().numpy()
+      f_dc = splats["sh0"].detach().transpose(1, 2).flatten(1).cpu().numpy()    # (N,3)
+      f_rest = splats["shN"].detach().transpose(1, 2).flatten(1).cpu().numpy()  # (N,45)
+      opac = splats["opacities"].detach().cpu().numpy().reshape(-1, 1)
+      scal = splats["scales"].detach().cpu().numpy()
+      rot = splats["quats"].detach().cpu().numpy()
+      Ng = xyz.shape[0]
+      fields = (["x", "y", "z", "nx", "ny", "nz"] + [f"f_dc_{i}" for i in range(3)] +
+                [f"f_rest_{i}" for i in range(f_rest.shape[1])] + ["opacity"] +
+                [f"scale_{i}" for i in range(3)] + [f"rot_{i}" for i in range(4)])
+      arr = np.concatenate([xyz, np.zeros((Ng, 3), np.float32), f_dc, f_rest, opac, scal, rot], 1).astype(np.float32)
+      elems = np.empty(Ng, dtype=[(f, "f4") for f in fields])
+      for i, f in enumerate(fields):
+          elems[f] = arr[:, i]
+      pc_dir = os.path.join(out_dir, f"point_cloud/iteration_{it}")
+      os.makedirs(pc_dir, exist_ok=True)
+      _PD([_PE.describe(elems, "vertex")]).write(os.path.join(pc_dir, "point_cloud.ply"))
+      print(f"[PLY] saved {Ng} gaussians -> {pc_dir}/point_cloud.ply")
+      # Adam moments alongside the ply. Without these a "fine-tune" restarts the optimiser
+      # from zero momentum, which measurably damages the model (-0.87 dB, see task_ft.md 39)
+      # and gets misread as the fine-tuning method failing.
+      torch.save({"n": Ng, "opt": {k: o.state_dict() for k, o in opt.items()}},
+                 os.path.join(pc_dir, "optim.pt"))
+      print(f"[CKPT] saved optimiser state -> {pc_dir}/optim.pt")
+      if POSE_OPT:
+          # Held-out cameras never receive a gradient, so their deltas stay zero while the
+          # map follows the corrected training poses. Persisting the deltas (with each
+          # camera's dataset idx and whether it was trained) lets apply_pose_deltas.py
+          # interpolate corrections onto the held-out cameras afterwards.
+          _tr = {id(c) for c in train}
+          np.savez(os.path.join(pc_dir, "poses.npz"),
+                   idx=np.array([c["idx_ds"] for c in cams], np.int64),
+                   trained=np.array([id(c) in _tr for c in cams], bool),
+                   dr=pose_dr.detach().cpu().numpy(), dt=pose_dt.detach().cpu().numpy())
+          _dn = pose_dt.detach().norm(dim=1)
+          print(f"[POSE] saved deltas -> {pc_dir}/poses.npz  "
+                f"|dt| med {float(_dn.median()):.3f} m max {float(_dn.max()):.3f} m", flush=True)
+
 
 torch.manual_seed(0); stack = []; t0 = time.time(); ema = None
 for step in range(ITERS):
@@ -353,51 +398,18 @@ for step in range(ITERS):
                 pose_dr.data[ti] -= pose_dr.data[ti].mean(0)
     strat.step_post_backward(params=splats, optimizers=opt, state=state, step=step, info=info, packed=False)
     ema = loss.item() if ema is None else 0.9 * ema + 0.1 * loss.item()
+    if (step + 1) in SAVE_AT:
+        # NOT equivalent to a run of this length: the depth-weight anneal and the SH
+        # ramp are indexed by step/ITERS, so a 7k checkpoint of a 30k run is a different
+        # model than a 7k run (20.306 vs 23.664 on 021). Use these for monitoring, and
+        # run each length separately when comparing lengths.
+        save_state(step + 1)
     if step % 500 == 0 or step == ITERS - 1:
         print(f"  it {step:5d}  loss {ema:.4f}  N={splats['means'].shape[0]}  "
               f"{(step+1)/(time.time()-t0):.1f} it/s", flush=True)
 torch.cuda.synchronize(); dt = time.time() - t0
 
-# save INRIA-format ply (for ksplat / viewers) — matches scene.gaussian_model.save_ply
-from plyfile import PlyData as _PD, PlyElement as _PE
-with torch.no_grad():
-    xyz = splats["means"].detach().cpu().numpy()
-    f_dc = splats["sh0"].detach().transpose(1, 2).flatten(1).cpu().numpy()    # (N,3)
-    f_rest = splats["shN"].detach().transpose(1, 2).flatten(1).cpu().numpy()  # (N,45)
-    opac = splats["opacities"].detach().cpu().numpy().reshape(-1, 1)
-    scal = splats["scales"].detach().cpu().numpy()
-    rot = splats["quats"].detach().cpu().numpy()
-    Ng = xyz.shape[0]
-    fields = (["x", "y", "z", "nx", "ny", "nz"] + [f"f_dc_{i}" for i in range(3)] +
-              [f"f_rest_{i}" for i in range(f_rest.shape[1])] + ["opacity"] +
-              [f"scale_{i}" for i in range(3)] + [f"rot_{i}" for i in range(4)])
-    arr = np.concatenate([xyz, np.zeros((Ng, 3), np.float32), f_dc, f_rest, opac, scal, rot], 1).astype(np.float32)
-    elems = np.empty(Ng, dtype=[(f, "f4") for f in fields])
-    for i, f in enumerate(fields):
-        elems[f] = arr[:, i]
-    pc_dir = os.path.join(out_dir, f"point_cloud/iteration_{ITERS}")
-    os.makedirs(pc_dir, exist_ok=True)
-    _PD([_PE.describe(elems, "vertex")]).write(os.path.join(pc_dir, "point_cloud.ply"))
-    print(f"[PLY] saved {Ng} gaussians -> {pc_dir}/point_cloud.ply")
-    # Adam moments alongside the ply. Without these a "fine-tune" restarts the optimiser
-    # from zero momentum, which measurably damages the model (-0.87 dB, see task_ft.md 39)
-    # and gets misread as the fine-tuning method failing.
-    torch.save({"n": Ng, "opt": {k: o.state_dict() for k, o in opt.items()}},
-               os.path.join(pc_dir, "optim.pt"))
-    print(f"[CKPT] saved optimiser state -> {pc_dir}/optim.pt")
-    if POSE_OPT:
-        # Held-out cameras never receive a gradient, so their deltas stay zero while the
-        # map follows the corrected training poses. Persisting the deltas (with each
-        # camera's dataset idx and whether it was trained) lets apply_pose_deltas.py
-        # interpolate corrections onto the held-out cameras afterwards.
-        _tr = {id(c) for c in train}
-        np.savez(os.path.join(pc_dir, "poses.npz"),
-                 idx=np.array([c["idx_ds"] for c in cams], np.int64),
-                 trained=np.array([id(c) in _tr for c in cams], bool),
-                 dr=pose_dr.detach().cpu().numpy(), dt=pose_dt.detach().cpu().numpy())
-        _dn = pose_dt.detach().norm(dim=1)
-        print(f"[POSE] saved deltas -> {pc_dir}/poses.npz  "
-              f"|dt| med {float(_dn.median()):.3f} m max {float(_dn.max()):.3f} m", flush=True)
+save_state(ITERS)
 
 def psnr(a, b): return float(-10 * torch.log10(((a - b) ** 2).mean()))
 try:
