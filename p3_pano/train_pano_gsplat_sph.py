@@ -339,10 +339,15 @@ def save_state(it):
                 f"|dt| med {float(_dn.median()):.3f} m max {float(_dn.max()):.3f} m", flush=True)
 
 
-torch.manual_seed(0); stack = []; t0 = time.time(); ema = None
+# SEED varies both the data order and torch's RNG. Even at a fixed seed two runs differ
+# (the rasterizer backward accumulates with atomics, so float summation order varies), and
+# that spread is the noise floor every A/B in this log is measured against -- it had never
+# been quantified, while decisions were being made on 0.04-0.2 dB differences.
+SEED = int(os.environ.get("SEED", "0"))
+torch.manual_seed(SEED); stack = []; t0 = time.time(); ema = None
 for step in range(ITERS):
     sh_deg = min(SH_MAX, step // (ITERS // (SH_MAX + 1) + 1))
-    if not stack: stack = train.copy(); random.Random(step).shuffle(stack)
+    if not stack: stack = train.copy(); random.Random(step + 100003 * SEED).shuffle(stack)
     cam = stack.pop()
     img, info = render(cam, sh_deg)
     strat.step_pre_backward(params=splats, optimizers=opt, state=state, step=step, info=info)
